@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+    "words",
+    "dir_resource",
+]
