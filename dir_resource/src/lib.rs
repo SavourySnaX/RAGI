@@ -1,4 +1,4 @@
-use std::ops::Index;
+use std::{ops::Index};
 
 #[cfg(test)]
 mod tests {

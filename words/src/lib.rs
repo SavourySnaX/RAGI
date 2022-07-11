@@ -6,14 +6,17 @@ mod tests
     use super::*;
 
     #[test]
-    fn construct_ok0() {
-        assert!(Words::new([0u8;52].into_iter()).is_ok());
-    }
-
-    #[test]
     fn construct_ok_a() {
         let mut test_data:Vec<u8> = Vec::from([0u8;52]);
         test_data.extend_from_slice(&[0u8,(b'a'^0x7F)|0x80,0x12,0x34]);
+        let words = Words::new(test_data.into_iter()).unwrap();
+        assert_eq!(words[String::from("a")],0x1234);
+    }
+    
+    #[test]
+    fn construct_ok_a_trailing() {
+        let mut test_data:Vec<u8> = Vec::from([0u8;52]);
+        test_data.extend_from_slice(&[0u8,(b'a'^0x7F)|0x80,0x12,0x34,0]);
         let words = Words::new(test_data.into_iter()).unwrap();
         assert_eq!(words[String::from("a")],0x1234);
     }
@@ -22,10 +25,19 @@ mod tests
     fn construct_fail_empty() {
         assert!(Words::new([0u8;52].into_iter()).is_err());
     }
+    
+    #[test]
+    fn construct_fail_broken_string() {
+        let mut test_data:Vec<u8> = Vec::from([0u8;52]);
+        test_data.extend_from_slice(&[0u8,(b'a'^0x7F),0x12,0x34]);
+        assert!(Words::new(test_data.into_iter()).is_err());
+    }
+
+
 }
 
 pub struct Words {
-    pub words : HashMap<String,u16>,
+    words : HashMap<String,u16>,
 }
 
 impl Index<String> for Words {
@@ -33,6 +45,15 @@ impl Index<String> for Words {
 
     fn index(&self, index: String) -> &Self::Output {
         self.words.index(&index)
+    }
+}
+
+impl IntoIterator for Words {
+    type Item = (String,u16);
+    type IntoIter = std::collections::hash_map::IntoIter<String,u16>;
+    
+    fn into_iter(self) -> Self::IntoIter {
+        self.words.into_iter()
     }
 }
 
@@ -62,12 +83,20 @@ impl Words {
             }
 
             if !last_word.is_empty() {
-                let word_num:u16 = bytes.next().unwrap().into();
-                let word_num = word_num<<8;
-                let t:u16 = bytes.next().unwrap().into();
-                let word_num = word_num + t;
-
-                words.insert(last_word.clone(), word_num);
+                if let Some(b) = bytes.next() {
+                    let word_num:u16 = b.into();
+                    let word_num = word_num<<8;
+                    if let Some(b)=bytes.next() {
+                        let t:u16 = b.into();
+                        let word_num = word_num + t;
+                
+                        words.insert(last_word.clone(), word_num);
+                    } else {
+                        return Err("Index byte missing for word");
+                    }
+                } else {
+                    return Err("Index byte missing for word");
+                }
             }
         }
         if words.len()==0 {
