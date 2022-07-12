@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fs::{self, File};
 use std::iter::Peekable;
 use std::vec;
@@ -42,6 +43,10 @@ fn dump_picture_resource(entry:&ResourceDirectoryEntry, index:usize) {
 
     dump_png(format!("../{}-priority.png",index).as_str(),320,200,&rgba);
 
+    let mut volume_iter = fetch_data_iterator(&volume, entry);
+
+    let data:Vec<u8> = volume_iter.cloned().collect();
+    fs::write(format!("../{}-binary.bin",index).as_str(),data).unwrap();
 }
 
 struct PictureResource
@@ -49,6 +54,18 @@ struct PictureResource
     picture: Vec<u8>,
     priority: Vec<u8>,
 }
+//todo upgrade to Result
+fn fetch_data_iterator<'a>(volume: &'a Volume, entry: &ResourceDirectoryEntry) -> impl Iterator<Item = &'a u8> {
+    let volume_iter = volume.data.iter().skip(entry.position as usize);
+    let mut volume_iter = volume_iter.skip(3);
+    // Skip 0x1234 and vol
+    let length:u16 = (*volume_iter.next().unwrap()).into();
+    let upper:u16 = (*volume_iter.next().unwrap()).into();
+    let upper = upper<<8;
+    let length=length+upper;
+    volume_iter.take(length as usize)
+}
+
 
 // Attach to volume manager - get picture resource...?
 fn process_picture(volume:&Volume, entry: &ResourceDirectoryEntry) -> Result<PictureResource, String> {
@@ -56,13 +73,7 @@ fn process_picture(volume:&Volume, entry: &ResourceDirectoryEntry) -> Result<Pic
     let mut picture = vec![15u8;160*200];
     let mut priority = vec![4u8;160*200];
 
-    let volume_iter = volume.data.iter().skip(entry.position as usize);
-    let mut volume_iter = volume_iter.skip(3);  // Skip 0x1234 and vol
-    let length:u16 = (*volume_iter.next().unwrap()).into();
-    let upper:u16 = (*volume_iter.next().unwrap()).into();
-    let upper = upper<<8;
-    let length=length+upper;
-    let mut volume_iter = volume_iter.take(length as usize).peekable();
+    let mut volume_iter = fetch_data_iterator(volume, entry).peekable();
 
     let mut colour_pen=15u8;
     let mut priority_pen=4u8;
@@ -208,29 +219,42 @@ fn rasterise_line(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,prio
 
 fn rasterise_fill(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8, x:u8, y:u8) {
 
-    let vec_coord = y as usize;
-    let vec_coord = vec_coord * 160;
-    let vec_coord: usize = vec_coord + x as usize;
+    let mut queue:VecDeque<(u8,u8)> = VecDeque::new();
 
-    if colour_on && picture[vec_coord]!=15 {
+    if x>159 || y>199 {
         return;
     }
 
-    if priority_on && priority[vec_coord]!=4 {
-        return;
-    }
+    queue.push_back((x,y));
 
-    if colour_on {
-        picture[vec_coord]=colour_pen;
-    }
-    if priority_on {
-        priority[vec_coord]=priority_pen;
-    }
+    while !queue.is_empty() {
 
-    if x<159 { rasterise_fill(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x+1, y); }
-    if x>0 {rasterise_fill(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x-1, y); }
-    if y<199 {rasterise_fill(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x, y+1); }
-    if y>0 {rasterise_fill(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x, y-1); }
+        let (x,y) = queue.pop_front().unwrap();
+
+        let vec_coord = y as usize;
+        let vec_coord = vec_coord * 160;
+        let vec_coord: usize = vec_coord + x as usize;
+
+        if colour_on && picture[vec_coord]!=15 {
+            continue;
+        }
+
+        if priority_on && priority[vec_coord]!=4 {
+            continue;
+        }
+
+        if colour_on {
+            picture[vec_coord]=colour_pen;
+        }
+        if priority_on {
+            priority[vec_coord]=priority_pen;
+        }
+
+        if x<159 { queue.push_back((x+1,y)); }
+        if x>0   { queue.push_back((x-1,y)); }
+        if y<199 { queue.push_back((x,y+1)); }
+        if y>0   { queue.push_back((x,y-1)); }
+    }
 
 }
 
@@ -243,6 +267,8 @@ where I: Iterator<Item = &'a u8> {
     let mut x=startx;
     let mut x1= x0;
     let mut y1= y0;
+
+    rasterise_plot(picture, priority, colour_on, priority_on, colour_pen, priority_pen, (*x0).into(), (*y0).into());
 
     while let Some(b) = volume_iter.peek() {
         if **b >= 0xF0 {
@@ -274,6 +300,8 @@ where I: Iterator<Item = &'a u8> {
     let mut x0 = volume_iter.next().unwrap();
     let mut y0 = volume_iter.next().unwrap();
 
+    rasterise_plot(picture, priority, colour_on, priority_on, colour_pen, priority_pen, (*x0).into(), (*y0).into());
+
     while let Some(b) = volume_iter.peek() {
         if **b >= 0xF0 {
             return;
@@ -290,34 +318,33 @@ where I: Iterator<Item = &'a u8> {
     }
 }
 
+fn decode_relative(rel:u8) -> i16 {
+    if (rel & 8) == 8 {
+        return 0i16-((rel&7) as i16);
+    } else {
+        return (rel&7) as i16;
+    }
+}
+
 fn relative_line<'a, I>(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,volume_iter:&mut Peekable<I>)
 where I: Iterator<Item = &'a u8> {
 
-    let mut x0 = *volume_iter.next().unwrap();
-    let mut y0 = *volume_iter.next().unwrap();
+    let mut x0 = *volume_iter.next().unwrap() as i16;
+    let mut y0 = *volume_iter.next().unwrap() as i16;
+
+    rasterise_plot(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x0,y0);
 
     while let Some(b) = volume_iter.peek() {
         if **b >= 0xF0 {
             return;
         }
         let rel = volume_iter.next().unwrap();
-        let mut disp:u8;
-        if rel&0x80==0x80 {
-            disp = 255u8.overflowing_mul((rel>>4)&0x7).0;
-        } else {
-            disp = 1u8.overflowing_mul((rel>>4)&0x7).0;
-        }
-        let x1 = x0.overflowing_add(disp).0;
-        if rel&0x8==0x8 {
-            disp = 255u8.overflowing_mul(rel&0x7).0;
-        } else {
-            disp = 1u8.overflowing_mul(rel&0x7).0;
-        }
-        let y1 = y0.overflowing_add(disp).0;
+        let x1 = x0 + decode_relative(rel>>4);
+        let y1 = y0 + decode_relative(rel&0x0F);
 
         println!("Relative Line : {} {},{} -> {},{}",rel,x0,y0,x1,y1);
 
-        rasterise_line(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x0.into(), y0.into(), x1.into(), y1.into());
+        rasterise_line(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x0, y0, x1, y1);
 
         x0=x1;
         y0=y1;
