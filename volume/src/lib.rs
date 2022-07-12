@@ -1,7 +1,7 @@
 
 
 pub struct Volume {
-    data:Vec<u8>,
+    pub data:Vec<u8>,
 }
 
 impl Volume {
