@@ -49,6 +49,14 @@ name = "dir_resource"
 version = "0.1.0"
 
 [[package]]
+name = "logic"
+version = "0.1.0"
+dependencies = [
+ "dir_resource",
+ "volume",
+]
+
+[[package]]
 name = "miniz_oxide"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

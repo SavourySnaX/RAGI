@@ -4,6 +4,7 @@ members = [
     "words",
     "picture",
     "view",
+    "logic",
     "volume",
     "dir_resource",
 ]
