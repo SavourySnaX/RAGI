@@ -3,6 +3,7 @@
 members = [
     "words",
     "picture",
+    "view",
     "volume",
     "dir_resource",
 ]

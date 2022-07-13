@@ -361,7 +361,7 @@ where I: Iterator<Item = &'a u8> {
 
         println!("Fill at : {},{}",x,y);
 
-        if (colour_on || priority_on) {
+        if colour_on || priority_on {
             rasterise_fill(picture, priority, colour_on, priority_on, colour_pen, priority_pen, *x, *y);
         }
     }

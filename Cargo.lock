@@ -79,6 +79,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "view"
+version = "0.1.0"
+dependencies = [
+ "dir_resource",
+ "png",
+ "volume",
+]
+
+[[package]]
 name = "volume"
 version = "0.1.0"
 
