@@ -2,6 +2,7 @@
 
 members = [
     "words",
+    "objects",
     "picture",
     "view",
     "logic",

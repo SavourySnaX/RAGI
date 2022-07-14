@@ -11,6 +11,4 @@ fn main() {
     for word in words {
         println!("{} - {}",word.0,word.1);
     }
-
-
 }
