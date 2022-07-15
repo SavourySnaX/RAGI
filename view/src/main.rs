@@ -168,9 +168,6 @@ fn process_view(index:usize, volume:&Volume, entry: &ResourceDirectoryEntry) -> 
             let rgba = conv_rgba_transparent(&doubled_width, trans_col);
 
             dump_png(format!("../{}-cell-{}-{}.png",index, l_index, c_index).as_str(),(*width as u32)*2,*height as u32,&rgba);
-
-
-
         }
     }
 

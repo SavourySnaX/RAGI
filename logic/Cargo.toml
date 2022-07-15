@@ -8,3 +8,5 @@ edition = "2021"
 [dependencies]
 dir_resource = {path = "../dir_resource"}
 volume = {path = "../volume"}
+objects = {path = "../objects"}
+words = {path = "../words"}

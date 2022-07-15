@@ -104,4 +104,14 @@ impl Words {
         }
         Ok(Words {words})
     }
+
+    pub fn fetch_all(&self,num:u16) -> Vec<String> {
+        let mut result:Vec<String>=Vec::new();
+        for (name,word_num) in &self.words {
+            if *word_num == num {
+                result.push(name.clone());
+            }
+        }
+        return result;
+    }
 }

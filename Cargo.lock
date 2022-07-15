@@ -53,7 +53,9 @@ name = "logic"
 version = "0.1.0"
 dependencies = [
  "dir_resource",
+ "objects",
  "volume",
+ "words",
 ]
 
 [[package]]
