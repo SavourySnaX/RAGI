@@ -1,5 +1,7 @@
-use dir_resource::{ResourceDirectory, ResourceDirectoryEntry};
-use objects::{Objects, Object};
+use std::{collections::HashMap, hash::Hash, ops};
+
+use dir_resource::ResourceDirectoryEntry;
+use objects::Objects;
 use volume::Volume;
 use words::Words;
 
@@ -14,6 +16,7 @@ pub struct LogicMessages {
 
 pub struct LogicSequence {
     operations:Vec<ActionOperation>,
+    labels:HashMap<TypeGoto,(bool,usize)>,
 }
 
 #[derive(PartialEq,Debug)]
@@ -29,20 +32,20 @@ enum LogicState {
 
 #[duplicate_item(name; [TypeFlag]; [TypeNum]; [TypeVar]; [TypeObject]; [TypeController]; [TypeMessage]; [TypeString]; [TypeItem])]
 #[derive(Clone,Copy)]
+#[allow(dead_code)]
 pub struct name {
     value:u8,
 }
 
 
-#[duplicate_item(name; [TypeWord]; [TypeLabel])]
 #[derive(Clone,Copy)]
-pub struct name {
+pub struct TypeWord {
     value:u16,
 }
 
-#[derive(Clone,Copy)]
+#[derive(Clone,Copy,Eq,Hash,PartialEq)]
 pub struct TypeGoto {
-    value:usize,
+    value:i16,
 }
 
 use duplicate::duplicate_item;
@@ -54,22 +57,24 @@ impl From<u8> for name {
     }
 }
 
-#[duplicate_item(name; [TypeWord]; [TypeLabel])]
-impl From<u16> for name {
+impl From<u16> for TypeWord {
     fn from(value: u16) -> Self {
-        name {value}
+        TypeWord {value}
     }
 }
 
-impl From<u16> for TypeGoto {
-    fn from(value:u16) -> Self {
-        TypeGoto {value: value as usize}
-    }
-}
-
-impl From<usize> for TypeGoto {
-    fn from(value:usize) -> Self {
+impl From<i16> for TypeGoto {
+    fn from(value: i16) -> Self {
         TypeGoto {value}
+    }
+}
+
+impl ops::Add<TypeGoto> for TypeGoto {
+    type Output = TypeGoto;
+    fn add(self, rhs:TypeGoto) -> Self::Output {
+        let a:i16 = self.value.into();
+        let b:i16 = rhs.value.into();
+        return (a+b).into();
     }
 }
 
@@ -165,6 +170,7 @@ pub enum ActionOperation {
     CurrentLoop((TypeObject,TypeVar)),
     CurrentView((TypeObject,TypeVar)),
     SetPriority((TypeObject,TypeNum)),
+    SetPriorityV((TypeObject,TypeVar)),
     ReleasePriority((TypeObject,)),
     GetPriority((TypeObject,TypeVar)),
     StopUpdate((TypeObject,)),
@@ -173,6 +179,7 @@ pub enum ActionOperation {
     IgnoreHorizon((TypeObject,)),
     ObserveHorizon((TypeObject,)),
     SetHorizon((TypeNum,)),
+    ObjectOnWater((TypeObject,)),
     ObjectOnLand((TypeObject,)),
     IgnoreObjs((TypeObject,)),
     ObserveObjs((TypeObject,)),
@@ -184,7 +191,7 @@ pub enum ActionOperation {
     CycleTime((TypeObject,TypeVar)),
     StopMotion((TypeObject,)),
     StartMotion((TypeObject,)),
-    StepSize((TypeObject,)),
+    StepSize((TypeObject,TypeVar)),
     StepTime((TypeObject,TypeVar)),
     MoveObj((TypeObject,TypeNum,TypeNum,TypeNum,TypeFlag)),
     MoveObjV((TypeObject,TypeVar,TypeVar,TypeVar,TypeFlag)),
@@ -199,7 +206,7 @@ pub enum ActionOperation {
     Get((TypeItem,)),
     GetV((TypeVar,)),
     Drop((TypeItem,)),
-    LoadSound(()),
+    LoadSound((TypeNum,)),
     Sound((TypeNum,TypeFlag)),
     StopSound(()),
     Print((TypeMessage,)),
@@ -209,7 +216,7 @@ pub enum ActionOperation {
     ClearLines((TypeNum,TypeNum,TypeNum)),
     TextScreen(()),
     Graphics(()),
-    SetCursorChar((TypeNum,TypeNum)),
+    SetCursorChar((TypeMessage,)),
     SetTextAttribute((TypeNum,TypeNum)),
     ShakeScreen((TypeNum,)),
     ConfigureScreen((TypeNum,TypeNum,TypeNum)),
@@ -218,7 +225,7 @@ pub enum ActionOperation {
     SetString((TypeString,TypeMessage)),
     GetString((TypeString,TypeMessage,TypeNum,TypeNum,TypeNum)),
     Parse((TypeString,)),
-    GetTypeNum((TypeMessage,TypeVar)),
+    GetNum((TypeMessage,TypeVar)),
     PreventInput(()),
     AcceptInput(()),
     SetKey((TypeNum,TypeNum,TypeController)),
@@ -249,7 +256,6 @@ pub enum ActionOperation {
     PrintAtV0((TypeMessage,TypeNum,TypeNum)),
     PrintAtV1((TypeMessage,TypeNum,TypeNum,TypeNum)),
     Goto((TypeGoto,)),
-    Label((TypeLabel,)),
     If((Vec<LogicChange>,TypeGoto)),
 }
 
@@ -282,7 +288,7 @@ impl LogicMessages {
         let decrypt_start_adjust:usize = 2;
         let mut messages:Vec<usize> = Vec::new();
         messages.reserve((*num_messages).into());
-        for m in 0..*num_messages {
+        for _ in 0..*num_messages {
             let lsb_pos = iter.next();
             if lsb_pos.is_none() {
                 return Err("Expected message LSB for message {m}");
@@ -301,7 +307,7 @@ impl LogicMessages {
         let decrypt = "Avis Durgan";
         let decrypt_start_adjust = decrypt_start_adjust + messages.len()*2;
         let message_block_slice = &text_slice[1..];
-        for (index,m) in messages.into_iter().enumerate() {
+        for m in messages {
             let mut string = String::new();
             if m!=0 {
                 let mut decrypt_iter = decrypt.bytes().cycle().skip(m-decrypt_start_adjust);
@@ -667,6 +673,20 @@ impl LogicResource {
 
 impl LogicSequence {
 
+    fn read_little_endian_i16(iter:&mut std::slice::Iter<u8>) -> Result<i16, &'static str> {
+        let lsb = iter.next();
+        if lsb.is_none() {
+            return Err("Expected LSB of U16, but reached end of iterator");
+        }
+        let lsb:i16 = (*lsb.unwrap()).into();
+        let msb = iter.next();
+        if msb.is_none() {
+            return Err("Expected MSB of U16, but reached end of iterator");
+        }
+        let msb:i16 = (*msb.unwrap()).into();
+        return Ok(((msb<<8)+lsb).into());
+    }
+
     fn read_little_endian_u16(iter:&mut std::slice::Iter<u8>) -> Result<u16, &'static str> {
         let lsb = iter.next();
         if lsb.is_none() {
@@ -682,7 +702,7 @@ impl LogicSequence {
     }
 
     fn parse_goto(iter:&mut std::slice::Iter<u8>) -> Result<TypeGoto, &'static str> {
-        return Ok(Self::read_little_endian_u16(iter)?.into());
+        return Ok(Self::read_little_endian_i16(iter)?.into());
     }
 
     fn parse_message(iter:&mut std::slice::Iter<u8>) -> Result<TypeMessage, &'static str> {
@@ -691,6 +711,14 @@ impl LogicSequence {
             return Err("Expected Message, but reached end of iterator");
         }
         return Ok((*m.unwrap()).into());
+    }
+
+    fn parse_string(iter:&mut std::slice::Iter<u8>) -> Result<TypeString, &'static str> {
+        let s = iter.next();
+        if s.is_none() {
+            return Err("Expected String, but reached end of iterator");
+        }
+        return Ok((*s.unwrap()).into());
     }
 
     fn parse_object(iter:&mut std::slice::Iter<u8>) -> Result<TypeObject, &'static str> {
@@ -759,6 +787,14 @@ impl LogicSequence {
         return Ok(words);
     }
 
+    fn parse_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum), &'static str> {
+        return Ok((Self::parse_num(iter)?,Self::parse_num(iter)?));
+    }
+
+    fn parse_num_flag(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeFlag), &'static str> {
+        return Ok((Self::parse_num(iter)?,Self::parse_flag(iter)?));
+    }
+    
     fn parse_var_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeVar,TypeNum), &'static str> {
         return Ok((Self::parse_var(iter)?,Self::parse_num(iter)?));
     }
@@ -766,13 +802,49 @@ impl LogicSequence {
     fn parse_var_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeVar,TypeVar), &'static str> {
         return Ok((Self::parse_var(iter)?,Self::parse_var(iter)?));
     }
+    
+    fn parse_object_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeNum), &'static str> {
+        return Ok((Self::parse_object(iter)?,Self::parse_num(iter)?));
+    }
+    
+    fn parse_object_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeVar), &'static str> {
+        return Ok((Self::parse_object(iter)?,Self::parse_var(iter)?));
+    }
+
+    fn parse_object_flag(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeFlag), &'static str> {
+        return Ok((Self::parse_object(iter)?,Self::parse_flag(iter)?));
+    }
+
+    fn parse_string_message(iter:&mut std::slice::Iter<u8>) -> Result<(TypeString,TypeMessage), &'static str> {
+        return Ok((Self::parse_string(iter)?,Self::parse_message(iter)?));
+    }
+
+    fn parse_message_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeMessage,TypeVar), &'static str> {
+        return Ok((Self::parse_message(iter)?,Self::parse_var(iter)?));
+    }
 
     fn parse_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum,TypeNum), &'static str> {
         return Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?));
     }
 
+    fn parse_num_num_message(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum,TypeMessage), &'static str> {
+        return Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_message(iter)?));
+    }
+
+    fn parse_num_num_controller(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum,TypeController), &'static str> {
+        return Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_controller(iter)?));
+    }
+
     fn parse_num_num_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum,TypeVar), &'static str> {
         return Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_var(iter)?));
+    }
+
+    fn parse_var_var_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeVar,TypeVar,TypeVar), &'static str> {
+        return Ok((Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?));
+    }
+
+    fn parse_object_object_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeObject,TypeVar), &'static str> {
+        return Ok((Self::parse_object(iter)?,Self::parse_object(iter)?,Self::parse_var(iter)?));
     }
 
     fn parse_message_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeMessage,TypeNum,TypeNum), &'static str> {
@@ -787,10 +859,38 @@ impl LogicSequence {
         return Ok((Self::parse_object(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?));
     }
 
+    fn parse_object_num_flag(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeNum,TypeFlag), &'static str> {
+        return Ok((Self::parse_object(iter)?,Self::parse_num(iter)?,Self::parse_flag(iter)?));
+    }
+
+    fn parse_num_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum,TypeNum,TypeNum), &'static str> {
+        return Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?));
+    }
+    
     fn parse_object_num_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeNum,TypeNum,TypeNum,TypeNum), &'static str> {
         return Ok((Self::parse_object(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?));
     }
+    
+    fn parse_object_num_num_num_flag(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeNum,TypeNum,TypeNum,TypeFlag), &'static str> {
+        return Ok((Self::parse_object(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_flag(iter)?));
+    }
+    
+    fn parse_object_var_var_var_flag(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeVar,TypeVar,TypeVar,TypeFlag), &'static str> {
+        return Ok((Self::parse_object(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_flag(iter)?));
+    }
+    
+    fn parse_string_message_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeString,TypeMessage,TypeNum,TypeNum,TypeNum), &'static str> {
+        return Ok((Self::parse_string(iter)?,Self::parse_message(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?));
+    }
 
+    fn parse_num_num_num_num_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum,TypeNum,TypeNum,TypeNum,TypeNum,TypeNum), &'static str> {
+        return Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?));
+    }
+    
+    fn parse_var_var_var_var_var_var_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeVar,TypeVar,TypeVar,TypeVar,TypeVar,TypeVar,TypeVar), &'static str> {
+        return Ok((Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?));
+    }
+    
     fn parse_condition_with_code(iter:&mut std::slice::Iter<u8>, code:u8) -> Result<LogicOperation, &'static str> {
         return match code {
             0x12 => Ok(LogicOperation::RightPosN(Self::parse_object_num_num_num_num(iter)?)),
@@ -860,13 +960,20 @@ impl LogicSequence {
 
         let mut iter = logic_slice.iter();
 
-        // First pass just translate, second pass then inserts the labels (since its easier that way)
-
         let mut operations:Vec<ActionOperation> = Vec::new();
-        operations.reserve(logic_slice.len());  // over allocate then shrink to fit at end of process (over allocates,because there are operands mixed into the stream)
+        let mut offsets:HashMap<TypeGoto, usize>=HashMap::new();
+        let mut offsets_rev:HashMap<usize, TypeGoto>=HashMap::new();
+        let initial_size = logic_slice.len();
+
+        operations.reserve(initial_size);  // over allocate then shrink to fit at end of process (over allocates,because there are operands mixed into the stream)
+        offsets.reserve(initial_size);
+        offsets_rev.reserve(initial_size);
 
         while let Some(b) = iter.next()
         {
+            let program_position = initial_size - iter.as_slice().len() -1;
+            offsets.insert((program_position as i16).into(), operations.len());
+            offsets_rev.insert(operations.len(),(program_position as i16).into());
             match b {
                 0xFF => operations.push(ActionOperation::If(Self::parse_vlogic_change_goto(&mut iter)?)),
                 0xFE => operations.push(ActionOperation::Goto((Self::parse_goto(&mut iter)?,))),
@@ -889,6 +996,92 @@ impl LogicSequence {
                 0x82 => operations.push(ActionOperation::Random(Self::parse_num_num_var(&mut iter)?)),
                 0x81 => operations.push(ActionOperation::ShowObj((Self::parse_num(&mut iter)?,))),
                 0x80 => operations.push(ActionOperation::RestartGame(())),
+                0x7E => operations.push(ActionOperation::RestoreGame(())),
+                0x7D => operations.push(ActionOperation::SaveGame(())),
+                0x7C => operations.push(ActionOperation::Status(())),
+                0x7B => operations.push(ActionOperation::AddToPicV(Self::parse_var_var_var_var_var_var_var(&mut iter)?)),
+                0x7A => operations.push(ActionOperation::AddToPic(Self::parse_num_num_num_num_num_num_num(&mut iter)?)),
+                0x79 => operations.push(ActionOperation::SetKey(Self::parse_num_num_controller(&mut iter)?)),
+                0x78 => operations.push(ActionOperation::AcceptInput(())),
+                0x77 => operations.push(ActionOperation::PreventInput(())),
+                0x76 => operations.push(ActionOperation::GetNum(Self::parse_message_var(&mut iter)?)),
+                0x75 => operations.push(ActionOperation::Parse((Self::parse_string(&mut iter)?,))),
+                0x73 => operations.push(ActionOperation::GetString(Self::parse_string_message_num_num_num(&mut iter)?)),
+                0x72 => operations.push(ActionOperation::SetString(Self::parse_string_message(&mut iter)?)),
+                0x71 => operations.push(ActionOperation::StatusLineOff(())),
+                0x70 => operations.push(ActionOperation::StatusLineOn(())),
+                0x6F => operations.push(ActionOperation::ConfigureScreen(Self::parse_num_num_num(&mut iter)?)),
+                0x6E => operations.push(ActionOperation::ShakeScreen((Self::parse_num(&mut iter)?,))),
+                0x6D => operations.push(ActionOperation::SetTextAttribute(Self::parse_num_num(&mut iter)?)),
+                0x6C => operations.push(ActionOperation::SetCursorChar((Self::parse_message(&mut iter)?,))),
+                0x6B => operations.push(ActionOperation::Graphics(())),
+                0x6A => operations.push(ActionOperation::TextScreen(())),
+                0x69 => operations.push(ActionOperation::ClearLines(Self::parse_num_num_num(&mut iter)?)),
+                0x68 => operations.push(ActionOperation::DisplayV(Self::parse_var_var_var(&mut iter)?)),
+                0x67 => operations.push(ActionOperation::Display(Self::parse_num_num_message(&mut iter)?)),
+                0x66 => operations.push(ActionOperation::PrintV((Self::parse_var(&mut iter)?,))),
+                0x65 => operations.push(ActionOperation::Print((Self::parse_message(&mut iter)?,))),
+                0x64 => operations.push(ActionOperation::StopSound(())),
+                0x63 => operations.push(ActionOperation::Sound(Self::parse_num_flag(&mut iter)?)),
+                0x62 => operations.push(ActionOperation::LoadSound((Self::parse_num(&mut iter)?,))),
+                0x5E => operations.push(ActionOperation::Drop((Self::parse_item(&mut iter)?,))),
+                0x5D => operations.push(ActionOperation::GetV((Self::parse_var(&mut iter)?,))),
+                0x5C => operations.push(ActionOperation::Get((Self::parse_item(&mut iter)?,))),
+                0x5B => operations.push(ActionOperation::Unblock(())),
+                0x5A => operations.push(ActionOperation::Block(Self::parse_num_num_num_num(&mut iter)?)),
+                0x59 => operations.push(ActionOperation::ObserveBlocks((Self::parse_object(&mut iter)?,))),
+                0x58 => operations.push(ActionOperation::IgnoreBlocks((Self::parse_object(&mut iter)?,))),
+                0x56 => operations.push(ActionOperation::SetDir(Self::parse_object_var(&mut iter)?)),
+                0x55 => operations.push(ActionOperation::NormalMotion((Self::parse_object(&mut iter)?,))),
+                0x54 => operations.push(ActionOperation::Wander((Self::parse_object(&mut iter)?,))),
+                0x53 => operations.push(ActionOperation::FollowEgo(Self::parse_object_num_flag(&mut iter)?)),
+                0x52 => operations.push(ActionOperation::MoveObjV(Self::parse_object_var_var_var_flag(&mut iter)?)),
+                0x51 => operations.push(ActionOperation::MoveObj(Self::parse_object_num_num_num_flag(&mut iter)?)),
+                0x50 => operations.push(ActionOperation::StepTime(Self::parse_object_var(&mut iter)?)),
+                0x4F => operations.push(ActionOperation::StepSize(Self::parse_object_var(&mut iter)?)),
+                0x4E => operations.push(ActionOperation::StartMotion((Self::parse_object(&mut iter)?,))),
+                0x4D => operations.push(ActionOperation::StopMotion((Self::parse_object(&mut iter)?,))),
+                0x4C => operations.push(ActionOperation::CycleTime(Self::parse_object_var(&mut iter)?)),
+                0x4B => operations.push(ActionOperation::ReverseLoop(Self::parse_object_flag(&mut iter)?)),
+                0x49 => operations.push(ActionOperation::EndOfLoop(Self::parse_object_flag(&mut iter)?)),
+                0x47 => operations.push(ActionOperation::StartCycling((Self::parse_object(&mut iter)?,))),
+                0x46 => operations.push(ActionOperation::StopCycling((Self::parse_object(&mut iter)?,))),
+                0x45 => operations.push(ActionOperation::Distance(Self::parse_object_object_var(&mut iter)?)),
+                0x44 => operations.push(ActionOperation::ObserveObjs((Self::parse_object(&mut iter)?,))),
+                0x43 => operations.push(ActionOperation::IgnoreObjs((Self::parse_object(&mut iter)?,))),
+                0x41 => operations.push(ActionOperation::ObjectOnLand((Self::parse_object(&mut iter)?,))),
+                //0x40 => operations.push(ActionOperation::ObjectOnWater((Self::parse_object(&mut iter)?,))),
+                0x3F => operations.push(ActionOperation::SetHorizon((Self::parse_num(&mut iter)?,))),
+                0x3E => operations.push(ActionOperation::ObserveHorizon((Self::parse_object(&mut iter)?,))),
+                0x3D => operations.push(ActionOperation::IgnoreHorizon((Self::parse_object(&mut iter)?,))),
+                0x3C => operations.push(ActionOperation::ForceUpdate((Self::parse_object(&mut iter)?,))),
+                0x3B => operations.push(ActionOperation::StartUpdate((Self::parse_object(&mut iter)?,))),
+                0x3A => operations.push(ActionOperation::StopUpdate((Self::parse_object(&mut iter)?,))),
+                0x39 => operations.push(ActionOperation::GetPriority(Self::parse_object_var(&mut iter)?)),
+                0x38 => operations.push(ActionOperation::ReleasePriority((Self::parse_object(&mut iter)?,))),
+                //0x37 => operations.push(ActionOperation::SetPriorityV(Self::parse_object_var(&mut iter)?)),
+                0x36 => operations.push(ActionOperation::SetPriority(Self::parse_object_num(&mut iter)?)),
+                0x34 => operations.push(ActionOperation::CurrentView(Self::parse_object_var(&mut iter)?)),
+                0x33 => operations.push(ActionOperation::CurrentLoop(Self::parse_object_var(&mut iter)?)),
+                0x32 => operations.push(ActionOperation::CurrentCel(Self::parse_object_var(&mut iter)?)),
+                0x31 => operations.push(ActionOperation::LastCel(Self::parse_object_var(&mut iter)?)),
+                0x30 => operations.push(ActionOperation::SetCelV(Self::parse_object_var(&mut iter)?)),
+                0x2F => operations.push(ActionOperation::SetCel(Self::parse_object_num(&mut iter)?,)),
+                0x2E => operations.push(ActionOperation::ReleaseLoop((Self::parse_object(&mut iter)?,))),
+                0x2D => operations.push(ActionOperation::FixLoop((Self::parse_object(&mut iter)?,))),
+                0x2C => operations.push(ActionOperation::SetLoopV(Self::parse_object_var(&mut iter)?)),
+                0x2B => operations.push(ActionOperation::SetLoop(Self::parse_object_num(&mut iter)?)),
+                0x2A => operations.push(ActionOperation::SetViewV(Self::parse_object_var(&mut iter)?)),
+                0x29 => operations.push(ActionOperation::SetView(Self::parse_object_num(&mut iter)?)),
+                0x28 => operations.push(ActionOperation::Reposition(Self::parse_object_var_var(&mut iter)?)),
+                0x27 => operations.push(ActionOperation::GetPosN(Self::parse_object_var_var(&mut iter)?)),
+                0x26 => operations.push(ActionOperation::PositionV(Self::parse_object_var_var(&mut iter)?)),
+                0x25 => operations.push(ActionOperation::Position(Self::parse_object_num_num(&mut iter)?)),
+                0x24 => operations.push(ActionOperation::Erase((Self::parse_object(&mut iter)?,))),
+                0x23 => operations.push(ActionOperation::Draw((Self::parse_object(&mut iter)?,))),
+                0x22 => operations.push(ActionOperation::UnanimateAll(())),
+                0x21 => operations.push(ActionOperation::AnimateObj((Self::parse_object(&mut iter)?,))),
+                0x20 => operations.push(ActionOperation::DiscardView((Self::parse_num(&mut iter)?,))),
                 0x1F => operations.push(ActionOperation::LoadViewV((Self::parse_var(&mut iter)?,))),
                 0x1E => operations.push(ActionOperation::LoadView((Self::parse_num(&mut iter)?,))),
                 0x1D => operations.push(ActionOperation::ShowPriScreen(())),
@@ -921,232 +1114,27 @@ impl LogicSequence {
                 _ => {panic!("Unimplemented action {b:02X}");}
             }
         }
-/*            match b {
-                0x7E => { println!("restore.game();"); indent=true; },
-                0x7D => { println!("save.game();"); indent=true; },
-                0x7C => { println!("status();"); indent=true; },
-                0x7B => { print!("add.to.pic.v("); (params[0],params[1],params[2],params[3],params[4],params[5],params[6])=(Operands::TypeVar,Operands::TypeVar,Operands::TypeVar,Operands::TypeVar,Operands::TypeVar,Operands::TypeVar,Operands::TypeVar); },
-                0x7A => { print!("add.to.pic("); (params[0],params[1],params[2],params[3],params[4],params[5],params[6])=(Operands::TypeNum,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum); },
-                0x79 => { print!("set.key("); (params[0],params[1],params[2])=(Operands::TypeNum,Operands::TypeNum,Operands::Controller); },
-                0x78 => { println!("accept.input();"); indent=true; },
-                0x77 => { println!("prevent.input();"); indent=true; },
-                0x76 => { print!("get.num("); (params[0],params[1])=(Operands::Message,Operands::TypeVar); },
-                0x75 => { print!("parse("); params[0]=Operands::String;},
-                0x73 => { print!("get.string("); (params[0],params[1],params[2],params[3],params[4])=(Operands::String,Operands::Message,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum); },
-                0x72 => { print!("set.string("); (params[0],params[1])=(Operands::String,Operands::Message); },
-                0x71 => { println!("status.line.off();"); indent=true; },
-                0x70 => { println!("status.line.on();"); indent=true; },
-                0x6F => { print!("configure.screen("); (params[0],params[1],params[2])=(Operands::TypeNum,Operands::TypeNum,Operands::TypeNum); },
-                0x6E => { print!("shake.screen("); params[0]=Operands::TypeNum;},
-                0x6D => { print!("set.text.attribute("); (params[0],params[1])=(Operands::TypeNum,Operands::TypeNum); },
-                0x6C => { print!("set.cursor.char("); params[0]=Operands::Message;},
-                0x6B => { println!("graphics();"); indent=true; },
-                0x6A => { println!("text.screen();"); indent=true; },
-                0x69 => { print!("clear.lines("); (params[0],params[1],params[2])=(Operands::TypeNum,Operands::TypeNum,Operands::TypeNum); },
-                0x68 => { print!("display.v("); (params[0],params[1],params[2])=(Operands::TypeVar,Operands::TypeVar,Operands::TypeVar); },
-                0x67 => { print!("display("); (params[0],params[1],params[2])=(Operands::TypeNum,Operands::TypeNum,Operands::Message); },
-                0x66 => { print!("print.v("); params[0]=Operands::TypeVar;},
-                0x65 => { print!("print("); params[0]=Operands::Message;},
-                0x64 => { println!("stop.sound();"); indent=true; },
-                0x63 => { print!("sound("); (params[0],params[1])=(Operands::TypeNum,Operands::TypeFlag); },
-                0x62 => { print!("load.sound("); params[0]=Operands::TypeNum;},
-                0x5E => { print!("drop("); params[0]=Operands::Item;},
-                0x5D => { print!("get.v("); params[0]=Operands::TypeVar;},
-                0x5C => { print!("get("); params[0]=Operands::Item;},
-                0x5B => { println!("unblock();"); indent=true; },
-                0x5A => { print!("block("); (params[0],params[1],params[2],params[3])=(Operands::TypeNum,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum); },
-                0x59 => { print!("observe.blocks("); params[0]=Operands::Object;},
-                0x58 => { print!("ignore.blocks("); params[0]=Operands::Object;},
-                0x56 => { print!("set.dir("); (params[0],params[1])=(Operands::Object,Operands::TypeVar);},
-                0x55 => { print!("normal.motion("); params[0]=Operands::Object;},
-                0x54 => { print!("wander("); params[0]=Operands::Object;},
-                0x53 => { print!("follow.ego("); (params[0],params[1],params[2])=(Operands::Object,Operands::TypeNum,Operands::TypeFlag); },
-                0x52 => { print!("move.obj.v("); (params[0],params[1],params[2],params[3],params[4])=(Operands::Object,Operands::TypeVar,Operands::TypeVar,Operands::TypeNum,Operands::TypeFlag); },
-                0x51 => { print!("move.obj("); (params[0],params[1],params[2],params[3],params[4])=(Operands::Object,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum,Operands::TypeFlag); },
-                0x50 => { print!("step.time("); (params[0],params[1])=(Operands::Object,Operands::TypeVar);},
-                0x4F => { print!("step.size("); (params[0],params[1])=(Operands::Object,Operands::TypeVar);},
-                0x4E => { print!("start.motion("); params[0]=Operands::Object;},
-                0x4D => { print!("stop.motion("); params[0]=Operands::Object;},
-                0x4C => { print!("cycle.time("); (params[0],params[1])=(Operands::Object,Operands::TypeVar);},
-                0x4B => { print!("reverse.loop("); (params[0],params[1])=(Operands::Object,Operands::TypeFlag);},
-                0x49 => { print!("end.of.loop("); (params[0],params[1])=(Operands::Object,Operands::TypeFlag);},
-                0x47 => { print!("start.cycling("); params[0]=Operands::Object;},
-                0x46 => { print!("stop.cycling("); params[0]=Operands::Object;},
-                0x45 => { print!("distance("); (params[0],params[1],params[2])=(Operands::Object,Operands::Object,Operands::TypeVar); },
-                0x44 => { print!("observe.objs("); params[0]=Operands::Object;},
-                0x43 => { print!("ignore.objs("); params[0]=Operands::Object;},
-                0x41 => { print!("object.on.land("); params[0]=Operands::Object;},
-                0x3F => { print!("set.horizon("); params[0]=Operands::TypeNum;},
-                0x3E => { print!("observe.horizon("); params[0]=Operands::Object;},
-                0x3D => { print!("ignore.horizon("); params[0]=Operands::Object;},
-                0x3C => { print!("force.update("); params[0]=Operands::Object;},
-                0x3B => { print!("start.update("); params[0]=Operands::Object;},
-                0x3A => { print!("stop.update("); params[0]=Operands::Object;},
-                0x39 => { print!("get.priority("); (params[0],params[1])=(Operands::Object,Operands::TypeVar);},
-                0x38 => { print!("release.priority("); params[0]=Operands::Object;},
-                0x36 => { print!("set.priority("); (params[0],params[1])=(Operands::Object,Operands::TypeNum);},
-                //0x35 => { print!("number.of.loops("); (params[0],params[1])=(Params::Object,Params::TypeVar);},
-                0x34 => { print!("current.view("); (params[0],params[1])=(Operands::Object,Operands::TypeVar); },
-                0x33 => { print!("current.loop("); (params[0],params[1])=(Operands::Object,Operands::TypeVar); },
-                0x32 => { print!("current.cel("); (params[0],params[1])=(Operands::Object,Operands::TypeVar); },
-                0x31 => { print!("last.cel("); (params[0],params[1])=(Operands::Object,Operands::TypeVar); },
-                0x30 => { print!("set.cel.v("); (params[0],params[1])=(Operands::Object,Operands::TypeVar); },
-                0x2F => { print!("set.cel("); (params[0],params[1])=(Operands::Object,Operands::TypeNum); },
-                0x2E => { print!("release.loop("); params[0]=Operands::Object; },
-                0x2D => { print!("fix.loop("); params[0]=Operands::Object; },
-                0x2C => { print!("set.loop.v("); (params[0],params[1])=(Operands::Object,Operands::TypeVar); },
-                0x2B => { print!("set.loop("); (params[0],params[1])=(Operands::Object,Operands::TypeNum); },
-                0x2A => { print!("set.view.v("); (params[0],params[1])=(Operands::Object,Operands::TypeVar); },
-                0x29 => { print!("set.view("); (params[0],params[1])=(Operands::Object,Operands::TypeNum); },
-                0x28 => { print!("reposition("); (params[0],params[1],params[2])=(Operands::Object,Operands::TypeVar,Operands::TypeVar); },
-                0x27 => { print!("get.posn("); (params[0],params[1],params[2])=(Operands::Object,Operands::TypeVar,Operands::TypeVar); },
-                0x26 => { print!("position("); (params[0],params[1],params[2])=(Operands::Object,Operands::TypeVar,Operands::TypeVar); },
-                0x25 => { print!("position("); (params[0],params[1],params[2])=(Operands::Object,Operands::TypeNum,Operands::TypeNum); },
-                0x24 => { print!("erase("); params[0]=Operands::Object; },
-                0x23 => { print!("draw("); params[0]=Operands::Object; },
-                0x22 => { println!("unanimate.all();"); indent=true; },
-                0x21 => { print!("animate.obj("); params[0]=Operands::Object; },
-                0x20 => { print!("discard.view("); params[0]=Operands::TypeNum; },
-                _ => panic!("Unhandled Action Command Type {:02X}", *b),
+
+        let mut labels:HashMap<TypeGoto, (bool,usize)>=HashMap::new();
+        labels.reserve(operations.len());
+        for (index,op) in operations.iter().enumerate() {
+            match op {
+                ActionOperation::Goto((g,)) => {
+                    let base_offset=offsets_rev[&(index+1)];
+                    let destination:TypeGoto = base_offset+*g;
+                    labels.insert(*g, (true,offsets[&destination]));
+                },
+                ActionOperation::If((_,g)) => {
+                    let base_offset=offsets_rev[&(index+1)];
+                    let destination:TypeGoto = base_offset+*g;
+                    labels.insert(*g, (false,offsets[&destination]));
+                }
+                _ => {},
             }
-            match
+        }
 
-
-
-
-            if params[param_idx] != Operands::None {
-                match params[param_idx] {
-                    Operands::TypeFlag => { print!("flag:{}",*b); },
-                    Operands::TypeNum => { print!("{}",*b); },
-                    Operands::TypeVar => { print!("var:{}",*b); },
-                    Operands::Object => { print!("obj:{}",*b); },
-                    Operands::Item => { print!("item:{}\"{}\"",*b, items.objects[(*b)as usize].name); },
-                    Operands::Controller => { print!("ctr:{}",*b); },
-                    Operands::Message => { print!("msg:{}\"{}\"",*b,self.logic_messages.strings[(*b) as usize]); },
-                    Operands::String => { print!("str:{}",*b); },
-                    Operands::WordLSB => { bracket_lsb = (*b).into(); },
-                    Operands::WordMSB => { let msb:u16 = (*b).into(); let word:u16=(msb<<8) + bracket_lsb; Self::print_words(words,word); },
-                    Operands::Said => { for w in 0..*b as usize { (params[1+w*2+0],params[1+w*2+1])=(Operands::WordLSB,Operands::WordMSB); }},
-                    Operands::None => panic!("Should not be reached"),
-                }
-                let last = params[param_idx];
-                params[param_idx]=Operands::None;
-                param_idx+=1;
-                if params[param_idx] == Operands::None {
-                    param_idx=0;
-                    match state {
-                        LogicState::Test | LogicState::TestOr => {
-                            print!(")");
-                        },
-                        LogicState::Action => {
-                            println!(");");
-                            indent=true;
-                        },
-                        _ => panic!("unexpected logic state {:?}",state),
-                    }
-                } else {
-                    match last {
-                        Operands::WordLSB | Operands::Said => {},
-                        _ => print!(","),
-                    }
-                }
-            } else {
-                match state {
-                    LogicState::TestOr => {
-                        match b {
-                            0xFD => { if expression_continue { print!(" || "); }  print!("!"); expression_continue=false; },
-                            0xFC => { print!(")"); state = LogicState::Test },
-                            0x12 => { if expression_continue { print!(" || "); } print!("right.posn("); (params[0],params[1],params[2],params[3],params[4])=(Operands::Object,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum); expression_continue=true; },
-                            0x10 => { if expression_continue { print!(" || "); } print!("obj.in.box("); (params[0],params[1],params[2],params[3],params[4])=(Operands::Object,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum); expression_continue=true; },
-                            0x0E => { if expression_continue { print!(" || "); } print!("said("); params[0]=Operands::Said; expression_continue=true; },
-                            0x0D => { if expression_continue { print!(" || "); } print!("have.key()"); expression_continue=true; },
-                            0x0C => { if expression_continue { print!(" || "); } print!("controller("); params[0]=Operands::Controller; expression_continue=true; },
-                            0x0B => { if expression_continue { print!(" || "); } print!("posn("); (params[0],params[1],params[2],params[3],params[4])=(Operands::Object,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum); expression_continue=true; },
-                            0x09 => { if expression_continue { print!(" || "); } print!("has("); params[0]=Operands::Item; expression_continue=true; },
-                            0x08 => { if expression_continue { print!(" || "); } print!("issetv("); params[0]=Operands::TypeVar; expression_continue=true; },
-                            0x07 => { if expression_continue { print!(" || "); } print!("isset("); params[0]=Operands::TypeFlag; expression_continue=true; },
-                            0x06 => { if expression_continue { print!(" || "); } print!("greaterv("); (params[0],params[1])=(Operands::TypeVar,Operands::TypeVar); expression_continue=true; },
-                            0x05 => { if expression_continue { print!(" || "); } print!("greatern("); (params[0],params[1])=(Operands::TypeVar,Operands::TypeNum); expression_continue=true; },
-                            0x04 => { if expression_continue { print!(" || "); } print!("lessv("); (params[0],params[1])=(Operands::TypeVar,Operands::TypeVar); expression_continue=true; },
-                            0x03 => { if expression_continue { print!(" || "); } print!("lessn("); (params[0],params[1])=(Operands::TypeVar,Operands::TypeNum); expression_continue=true; },
-                            0x02 => { if expression_continue { print!(" || "); } print!("equalv("); (params[0],params[1])=(Operands::TypeVar,Operands::TypeVar); expression_continue=true; },
-                            0x01 => { if expression_continue { print!(" || "); } print!("equaln("); (params[0],params[1])=(Operands::TypeVar,Operands::TypeNum); expression_continue=true; },
-                            _ => panic!("Unhandled Test Command Type {:02X}",*b),
-                        }
-                    },
-                    LogicState::Test => {
-                        match b {
-                            0xFF => { println!(")"); state=LogicState::BracketStart; indent=true;},
-                            0xFD => { if expression_continue { print!(" && "); } print!("!"); expression_continue=false; },
-                            0xFC => { if expression_continue { print!(" && "); } print!("("); state=LogicState::TestOr; expression_continue=false; },
-                            0x12 => { if expression_continue { print!(" && "); } print!("right.posn("); (params[0],params[1],params[2],params[3],params[4])=(Operands::Object,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum); expression_continue=true; },
-                            0x10 => { if expression_continue { print!(" && "); } print!("obj.in.box("); (params[0],params[1],params[2],params[3],params[4])=(Operands::Object,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum); expression_continue=true; },
-                            0x0E => { if expression_continue { print!(" && "); } print!("said("); params[0]=Operands::Said; expression_continue=true; },
-                            0x0D => { if expression_continue { print!(" && "); } print!("have.key()"); expression_continue=true; },
-                            0x0C => { if expression_continue { print!(" && "); } print!("controller("); params[0]=Operands::Controller; expression_continue=true; },
-                            0x0B => { if expression_continue { print!(" && "); } print!("posn("); (params[0],params[1],params[2],params[3],params[4])=(Operands::Object,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum,Operands::TypeNum); expression_continue=true; },
-                            0x09 => { if expression_continue { print!(" && "); } print!("has("); params[0]=Operands::Item; expression_continue=true; },
-                            0x08 => { if expression_continue { print!(" && "); } print!("issetv("); params[0]=Operands::TypeVar; expression_continue=true; },
-                            0x07 => { if expression_continue { print!(" && "); } print!("isset("); params[0]=Operands::TypeFlag; expression_continue=true; },
-                            0x06 => { if expression_continue { print!(" && "); } print!("greaterv("); (params[0],params[1])=(Operands::TypeVar,Operands::TypeVar); expression_continue=true; },
-                            0x05 => { if expression_continue { print!(" && "); } print!("greatern("); (params[0],params[1])=(Operands::TypeVar,Operands::TypeNum); expression_continue=true; },
-                            0x04 => { if expression_continue { print!(" && "); } print!("lessv("); (params[0],params[1])=(Operands::TypeVar,Operands::TypeVar); expression_continue=true; },
-                            0x03 => { if expression_continue { print!(" && "); } print!("lessn("); (params[0],params[1])=(Operands::TypeVar,Operands::TypeNum); expression_continue=true; },
-                            0x02 => { if expression_continue { print!(" && "); } print!("equalv("); (params[0],params[1])=(Operands::TypeVar,Operands::TypeVar); expression_continue=true; },
-                            0x01 => { if expression_continue { print!(" && "); } print!("equaln("); (params[0],params[1])=(Operands::TypeVar,Operands::TypeNum); expression_continue=true; },
-                            _ => panic!("Unhandled Test Command Type {:02X}",*b),
-                        }
-                    },
-                    LogicState::Action => {
-                    },
-                    LogicState::BracketStart => {
-                        bracket_lsb = (*b).into();
-                        state=LogicState::BracketEnd;
-                    },
-                    LogicState::BracketEnd => {
-                        let msb:u16 = (*b).into();
-                        let pos:u16 = (msb<<8)+bracket_lsb;
-                        bracket_label_stack.push((pos+1,0));  // +1 because will be decremented immediately
-                        bracket_label_indent+=1;
-                        println!("{{"); indent=true;
-                        state=LogicState::Action;
-                    },
-                    LogicState::GotoStart => {
-                        bracket_lsb = (*b).into();
-                        state=LogicState::GotoEnd;
-                    },
-                    LogicState::GotoEnd => {
-                        let msb:u16 = (*b).into();
-                        let pos:u16 = (msb<<8)+bracket_lsb;
-                        bracket_label_stack.push((pos+1,next_label));  // +1 because will be decremented immediately
-                        let label = format!("LABEL_{:04}",next_label);
-                        next_label+=1;
-                        println!("{};",label); indent=true;
-                        state=LogicState::Action;
-                    },
-                }
-            }
-            if !bracket_label_stack.is_empty() {
-                for s in (0..bracket_label_stack.len()).rev() {
-                    let (mut cnt,label) = bracket_label_stack[s];
-                    cnt-=1;
-                    if cnt==0 {
-                        bracket_label_stack.remove(s);
-                        if label!=0 {
-                            let label = format!("LABEL_{:04}",label);
-                            println!("{}:",label); indent=true;
-                        } else {
-                            bracket_label_indent-=1;
-                            println!("{:indent$}}}","",indent=bracket_label_indent); indent=true;
-                        }
-                    } else {
-                        bracket_label_stack[s]=(cnt,label);
-                    }
-                }
-            }
-            if indent {print!("{:indent$}","",indent=bracket_label_indent); indent=false;}
-        }*/
-
-        Err("SDK<jflskdhjf")
+        operations.shrink_to_fit();
+        labels.shrink_to_fit();
+        return Ok(LogicSequence { operations, labels });
     }
 }
