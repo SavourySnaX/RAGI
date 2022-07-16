@@ -49,6 +49,22 @@ name = "dir_resource"
 version = "0.1.0"
 
 [[package]]
+name = "duplicate"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a2535fcf1437c9de0d91a3921351c474258abdb6440cd03bb5a7cf0547e7214"
+dependencies = [
+ "heck",
+ "proc-macro-error",
+]
+
+[[package]]
+name = "heck"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2540771e65fc8cb83cd6e8a237f70c319bd5c29f78ed1084ba5d50eeac86f7f9"
+
+[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -65,7 +81,9 @@ name = "logic"
 version = "0.1.0"
 dependencies = [
  "dir_resource",
+ "duplicate",
  "objects",
+ "tuple-arity",
  "volume",
  "words",
 ]
@@ -105,6 +123,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro-error"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da25490ff9892aab3fcf7c36f08cfb902dd3e71ca0f9f9517bea02a73a5ce38c"
+dependencies = [
+ "proc-macro-error-attr",
+ "proc-macro2",
+ "quote",
+ "syn",
+ "version_check",
+]
+
+[[package]]
+name = "proc-macro-error-attr"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1be40180e52ecc98ad80b184934baf3d0d29f979574e439af5a55274b35f869"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "version_check",
+]
+
+[[package]]
+name = "proc-macro2"
+version = "1.0.40"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd96a1e8ed2596c337f8eae5f24924ec83f5ad5ab21ea8e455d3566c69fbcaf7"
+dependencies = [
+ "unicode-ident",
+]
+
+[[package]]
+name = "quote"
+version = "1.0.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bcdf212e9776fbcb2d23ab029360416bb1706b1aea2d1a5ba002727cbcab804"
+dependencies = [
+ "proc-macro2",
+]
+
+[[package]]
 name = "ragi"
 version = "0.1.0"
 dependencies = [
@@ -135,10 +195,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "syn"
+version = "1.0.98"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c50aef8a904de4c23c788f104b7dddc7d6f79c647c7c8ce4cc8f73eb0ca773dd"
+dependencies = [
+ "proc-macro2",
+ "unicode-ident",
+]
+
+[[package]]
+name = "tuple-arity"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "013fb50b6c1dd805afa3ce907a7837e27b991a2907c600d22e3a4882d4e0d458"
+
+[[package]]
+name = "unicode-ident"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15c61ba63f9235225a22310255a29b806b907c9b8c964bcbd0a2c70f3f2deea7"
+
+[[package]]
 name = "version-compare"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe88247b92c1df6b6de80ddc290f3976dbdf2f5f5d3fd049a9fb598c6dd5ca73"
+
+[[package]]
+name = "version_check"
+version = "0.9.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "view"
@@ -152,6 +240,9 @@ dependencies = [
 [[package]]
 name = "volume"
 version = "0.1.0"
+dependencies = [
+ "dir_resource",
+]
 
 [[package]]
 name = "words"
