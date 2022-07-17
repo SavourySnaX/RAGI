@@ -359,14 +359,14 @@ impl LogicResource {
             string+="<rest of line>";
         } else {
             let match_words = words.fetch_all(word_num);
-            string+=" (";
+            string+="(";
             for (index,word) in match_words.into_iter().enumerate() {
                 if index !=0 {
                     string+=" || ";
                 }
                 string+=format!("\"{}\"",word).as_str();
             }
-            string+=" )";
+            string+=")";
         }
 
         return string;
@@ -396,8 +396,8 @@ impl LogicResource {
         return format!("ctr:{}",t.value);
     }
 
-    fn param_dis_message(t:&TypeMessage) -> String {
-        return format!("ctr:{}",t.value);
+    fn param_dis_message(&self, t:&TypeMessage) -> String {
+        return format!("msg:{}\"{}\"",t.value,self.logic_messages.strings[(t.value) as usize]);
     }
 
     fn param_dis_string(t:&TypeString) -> String {
@@ -463,13 +463,156 @@ impl LogicResource {
         return string;
     }
 
+    pub fn action_args_disassemble(&self,action:&ActionOperation,words:&Words,items:&Objects) -> String {
+        return match action {
+            ActionOperation::Return(a) |
+            ActionOperation::ShowPic(a) |
+            ActionOperation::UnanimateAll(a) |
+            ActionOperation::Unblock(a) |
+            ActionOperation::StopSound(a) |
+            ActionOperation::TextScreen(a) |
+            ActionOperation::Graphics(a) |
+            ActionOperation::StatusLineOn(a) |
+            ActionOperation::StatusLineOff(a) |
+            ActionOperation::PreventInput(a) |
+            ActionOperation::AcceptInput(a) |
+            ActionOperation::Status(a) |
+            ActionOperation::SaveGame(a) |
+            ActionOperation::RestoreGame(a) |
+            ActionOperation::RestartGame(a) |
+            ActionOperation::ProgramControl(a) |
+            ActionOperation::PlayerControl(a) |
+            ActionOperation::QuitV0(a) |
+            ActionOperation::ShowMem(a) |
+            ActionOperation::Pause(a) |
+            ActionOperation::EchoLine(a) |
+            ActionOperation::CancelLine(a) |
+            ActionOperation::InitJoy(a) |
+            ActionOperation::ToggleMonitor(a) |
+            ActionOperation::ShowPriScreen(a) |
+            ActionOperation::Version(a) => String::new(),
+            ActionOperation::Increment(a) |
+            ActionOperation::Decrement(a) |
+            ActionOperation::SetV(a) |
+            ActionOperation::ResetV(a) |
+            ActionOperation::NewRoomV(a) |
+            ActionOperation::CallV(a) |
+            ActionOperation::LoadPic(a) |
+            ActionOperation::DrawPic(a) |
+            ActionOperation::DiscardPic(a) |
+            ActionOperation::LoadViewV(a) |
+            ActionOperation::GetV(a) |
+            ActionOperation::PrintV(a) |
+            ActionOperation::ObjStatusV(a) => Self::param_dis_var(&a.0),
+            ActionOperation::NewRoom(a) |
+            ActionOperation::LoadLogic(a) |
+            ActionOperation::Call(a) |
+            ActionOperation::LoadView(a) |
+            ActionOperation::DiscardView(a) |
+            ActionOperation::SetHorizon(a) |
+            ActionOperation::LoadSound(a) |
+            ActionOperation::ShakeScreen(a) |
+            ActionOperation::ShowObj(a) |
+            ActionOperation::QuitV1(a) => Self::param_dis_num(&a.0),
+            ActionOperation::Set(a) |
+            ActionOperation::Reset(a) |
+            ActionOperation::Toggle(a) => Self::param_dis_flag(&a.0),
+            ActionOperation::Draw(a) |
+            ActionOperation::Erase(a) |
+            ActionOperation::FixLoop(a) |
+            ActionOperation::ReleaseLoop(a) |
+            ActionOperation::ReleasePriority(a)|
+            ActionOperation::StopUpdate(a) |
+            ActionOperation::StartUpdate(a) |
+            ActionOperation::ForceUpdate(a) |
+            ActionOperation::IgnoreHorizon(a) |
+            ActionOperation::ObserveHorizon(a) |
+            ActionOperation::ObjectOnWater(a) |
+            ActionOperation::ObjectOnLand(a) |
+            ActionOperation::IgnoreObjs(a) |
+            ActionOperation::ObserveObjs(a) |
+            ActionOperation::StopCycling(a) |
+            ActionOperation::StartCycling(a) |
+            ActionOperation::StopMotion(a) |
+            ActionOperation::StartMotion(a) |
+            ActionOperation::Wander(a) |
+            ActionOperation::NormalMotion(a) |
+            ActionOperation::IgnoreBlocks(a) |
+            ActionOperation::AnimateObj(a) |
+            ActionOperation::ObserveBlocks(a) => Self::param_dis_object(&a.0),
+            ActionOperation::Get(a) |
+            ActionOperation::Drop(a) => Self::param_dis_item(&a.0, items),
+            ActionOperation::Print(a) |
+            ActionOperation::SetCursorChar(a) |
+            ActionOperation::SetGameID(a) => self.param_dis_message(&a.0),
+            ActionOperation::Parse(a) => Self::param_dis_string(&a.0),
+            ActionOperation::SetTextAttribute(a) => format!("{},{}",Self::param_dis_num(&a.0),Self::param_dis_num(&a.1)),
+            ActionOperation::Sound(a) => format!("{},{}",Self::param_dis_num(&a.0),Self::param_dis_flag(&a.1)),
+            ActionOperation::AddN(a) |
+            ActionOperation::SubN(a) |
+            ActionOperation::LIndirectN(a) |
+            ActionOperation::AssignN(a) => format!("{},{}",Self::param_dis_var(&a.0),Self::param_dis_num(&a.1)),
+            ActionOperation::AddV(a) |
+            ActionOperation::SubV(a) |
+            ActionOperation::LIndirectV(a) |
+            ActionOperation::RIndirect(a) |
+            ActionOperation::AssignV(a) => format!("{},{}",Self::param_dis_var(&a.0),Self::param_dis_var(&a.1)),
+            ActionOperation::SetView(a) |
+            ActionOperation::SetLoop(a) |
+            ActionOperation::SetCel(a) |
+            ActionOperation::SetPriority(a) => format!("{},{}",Self::param_dis_object(&a.0),Self::param_dis_num(&a.1)),
+            ActionOperation::SetViewV(a) |
+            ActionOperation::SetLoopV(a) |
+            ActionOperation::SetCelV(a) |
+            ActionOperation::LastCel(a) |
+            ActionOperation::CurrentCel(a) |
+            ActionOperation::CurrentLoop(a) |
+            ActionOperation::CurrentView(a) |
+            ActionOperation::SetPriorityV(a) |
+            ActionOperation::GetPriority(a) |
+            ActionOperation::CycleTime(a) |
+            ActionOperation::StepSize(a) |
+            ActionOperation::StepTime(a) |
+            ActionOperation::SetDir(a) => format!("{},{}",Self::param_dis_object(&a.0),Self::param_dis_var(&a.1)),
+            ActionOperation::EndOfLoop(a) |
+            ActionOperation::ReverseLoop(a) => format!("{},{}",Self::param_dis_object(&a.0),Self::param_dis_flag(&a.1)),
+            ActionOperation::SetString(a) => format!("{},{}",Self::param_dis_string(&a.0),self.param_dis_message(&a.1)),
+            ActionOperation::GetNum(a) => format!("{},{}",self.param_dis_message(&a.0),Self::param_dis_var(&a.1)),
+            ActionOperation::ClearLines(a) |
+            ActionOperation::TraceInfo(a) |
+            ActionOperation::ConfigureScreen(a) => format!("{},{},{}",Self::param_dis_num(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2)),
+            ActionOperation::Random(a) => format!("{},{},{}",Self::param_dis_num(&a.0),Self::param_dis_num(&a.1),Self::param_dis_var(&a.2)),
+            ActionOperation::Display(a) => format!("{},{},{}",Self::param_dis_num(&a.0),Self::param_dis_num(&a.1),self.param_dis_message(&a.2)),
+            ActionOperation::SetKey(a) => format!("{},{},{}",Self::param_dis_num(&a.0),Self::param_dis_num(&a.1),Self::param_dis_controller(&a.2)),
+            ActionOperation::DisplayV(a) => format!("{},{},{}",Self::param_dis_var(&a.0),Self::param_dis_var(&a.1),Self::param_dis_var(&a.2)),
+            ActionOperation::RepositionTo(a) |
+            ActionOperation::Position(a) => format!("{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2)),
+            ActionOperation::PositionV(a) |
+            ActionOperation::GetPosN(a) |
+            ActionOperation::RepositionToV(a) |
+            ActionOperation::Reposition(a) => format!("{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_var(&a.1),Self::param_dis_var(&a.2)),
+            ActionOperation::Distance(a) => format!("{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_object(&a.1),Self::param_dis_var(&a.2)),
+            ActionOperation::FollowEgo(a) => format!("{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_num(&a.1),Self::param_dis_flag(&a.2)),
+            ActionOperation::PrintAtV0(a) => format!("{},{},{}",self.param_dis_message(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2)),
+            ActionOperation::MoveObj(a) => todo!(),
+            ActionOperation::MoveObjV(a) => todo!(),
+            ActionOperation::Block(a) => todo!(),
+            ActionOperation::GetString(a) => todo!(),
+            ActionOperation::AddToPic(a) => todo!(),
+            ActionOperation::AddToPicV(a) => todo!(),
+            ActionOperation::PrintAtV1(a) => todo!(),
+            ActionOperation::Goto(_) => panic!("Should not be reached"),
+            ActionOperation::If(_) => panic!("Should not be reached"),
+        }
+    }
+
     pub fn instruction_disassemble(&self,action:&ActionOperation,words:&Words,items:&Objects) -> String {
 
         let s:&'static str = action.into();
         return match action {
             ActionOperation::If((logic,_)) => format!("{} ( {} )",s, Self::logic_disassemble(logic,false,words,items)),
             ActionOperation::Goto(a) => format!("{} label_{}",s, self.logic_sequence.labels[&a.0].2),
-            _ => format!("{} ( {} )",s,String::new()),
+            _ => format!("{}({})",s,self.action_args_disassemble(action,words,items)),
         };
     }
 
