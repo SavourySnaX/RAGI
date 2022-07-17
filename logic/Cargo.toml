@@ -12,3 +12,5 @@ objects = {path = "../objects"}
 words = {path = "../words"}
 duplicate = "0.4.0"
 tuple-arity = "0.1.2"
+strum = "0.24.1"
+strum_macros = "0.24.1"

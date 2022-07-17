@@ -83,6 +83,8 @@ dependencies = [
  "dir_resource",
  "duplicate",
  "objects",
+ "strum",
+ "strum_macros",
  "tuple-arity",
  "volume",
  "words",
@@ -172,6 +174,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustversion"
+version = "1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24c8ad4f0c00e1eb5bc7614d236a7f1300e3dbd76b68cac8e06fb00b015ad8d8"
+
+[[package]]
 name = "sdl2"
 version = "0.35.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -195,12 +203,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "strum"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
+
+[[package]]
+name = "strum_macros"
+version = "0.24.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4faebde00e8ff94316c01800f9054fd2ba77d30d9e922541913051d1d978918b"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn",
+]
+
+[[package]]
 name = "syn"
 version = "1.0.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c50aef8a904de4c23c788f104b7dddc7d6f79c647c7c8ce4cc8f73eb0ca773dd"
 dependencies = [
  "proc-macro2",
+ "quote",
  "unicode-ident",
 ]
 

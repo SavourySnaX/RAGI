@@ -5,6 +5,9 @@ use objects::Objects;
 use volume::Volume;
 use words::Words;
 
+use std::convert::AsRef;
+use strum_macros::AsRefStr;
+
 pub struct LogicResource {
     logic_sequence:LogicSequence,
     logic_messages:LogicMessages,
@@ -94,6 +97,7 @@ enum Operands {
     None,
 }
 
+#[derive(AsRefStr)]
 pub enum LogicOperation {
     EqualN((TypeVar,TypeNum)),
     EqualV((TypeVar,TypeVar)),
@@ -112,12 +116,15 @@ pub enum LogicOperation {
     RightPosN((TypeObject,TypeNum,TypeNum,TypeNum,TypeNum)),
 }
 
+#[derive(AsRefStr)]
 pub enum LogicChange {
+    #[strum(serialize = "")]
     Normal((LogicOperation,)),
     Not((LogicOperation,)),
     Or((Vec<LogicChange>,)),
 }
 
+#[derive(AsRefStr)]
 pub enum ActionOperation {
     Return(()),
     Increment((TypeVar,)),
