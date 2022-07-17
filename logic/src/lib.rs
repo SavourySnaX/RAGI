@@ -5,8 +5,7 @@ use objects::Objects;
 use volume::Volume;
 use words::Words;
 
-use std::convert::AsRef;
-use strum_macros::AsRefStr;
+use strum_macros::IntoStaticStr;
 
 pub struct LogicResource {
     logic_sequence:LogicSequence,
@@ -18,19 +17,8 @@ pub struct LogicMessages {
 }
 
 pub struct LogicSequence {
-    operations:Vec<ActionOperation>,
-    labels:HashMap<TypeGoto,(bool,usize)>,
-}
-
-#[derive(PartialEq,Debug)]
-enum LogicState {
-    Action,
-    Test,
-    TestOr,
-    BracketStart,
-    BracketEnd,
-    GotoStart,
-    GotoEnd,
+    operations:Vec<(ActionOperation,TypeGoto)>,
+    labels:HashMap<TypeGoto,(bool,u16,usize)>,
 }
 
 #[duplicate_item(name; [TypeFlag]; [TypeNum]; [TypeVar]; [TypeObject]; [TypeController]; [TypeMessage]; [TypeString]; [TypeItem])]
@@ -46,7 +34,7 @@ pub struct TypeWord {
     value:u16,
 }
 
-#[derive(Clone,Copy,Eq,Hash,PartialEq)]
+#[derive(Clone,Copy,Eq,Hash,PartialEq,Debug)]
 pub struct TypeGoto {
     value:i16,
 }
@@ -97,7 +85,7 @@ enum Operands {
     None,
 }
 
-#[derive(AsRefStr)]
+#[derive(IntoStaticStr)]
 pub enum LogicOperation {
     EqualN((TypeVar,TypeNum)),
     EqualV((TypeVar,TypeVar)),
@@ -116,7 +104,7 @@ pub enum LogicOperation {
     RightPosN((TypeObject,TypeNum,TypeNum,TypeNum,TypeNum)),
 }
 
-#[derive(AsRefStr)]
+#[derive(IntoStaticStr)]
 pub enum LogicChange {
     #[strum(serialize = "")]
     Normal((LogicOperation,)),
@@ -124,7 +112,7 @@ pub enum LogicChange {
     Or((Vec<LogicChange>,)),
 }
 
-#[derive(AsRefStr)]
+#[derive(IntoStaticStr)]
 pub enum ActionOperation {
     Return(()),
     Increment((TypeVar,)),
@@ -363,26 +351,153 @@ impl LogicResource {
         Ok(LogicResource {logic_sequence, logic_messages})
     }
 
-    fn print_words(words:&Words,word_num:u16) {
-        print!("word:{}",word_num);
+    fn disassemble_words(words:&Words,word_num:u16) -> String {
+        let mut string = format!("word:{}",word_num);
         if word_num == 1 {
-            print!("<any>");
+            string+="<any>";
         } else if word_num == 9999 {
-            print!("<rest of line>");
+            string+="<rest of line>";
         } else {
             let match_words = words.fetch_all(word_num);
-            print!(" (");
+            string+=" (";
             for (index,word) in match_words.into_iter().enumerate() {
                 if index !=0 {
-                    print!(" || ");
+                    string+=" || ";
                 }
-                print!("\"{}\"",word);
+                string+=format!("\"{}\"",word).as_str();
             }
-            print!(" )");
+            string+=" )";
+        }
+
+        return string;
+    }
+
+    fn param_dis_num(t:&TypeNum) -> String {
+        return format!("{}",t.value);
+    }
+
+    fn param_dis_flag(t:&TypeFlag) -> String {
+        return format!("flag:{}",t.value);
+    }
+
+    fn param_dis_var(t:&TypeVar) -> String {
+        return format!("var:{}",t.value);
+    }
+
+    fn param_dis_object(t:&TypeObject) -> String {
+        return format!("obj:{}",t.value);
+    }
+
+    fn param_dis_item(t:&TypeItem,items:&Objects) -> String {
+        return format!("item:{}\"{}\"",t.value, items.objects[t.value as usize].name);
+    }
+
+    fn param_dis_controller(t:&TypeController) -> String {
+        return format!("ctr:{}",t.value);
+    }
+
+    fn param_dis_message(t:&TypeMessage) -> String {
+        return format!("ctr:{}",t.value);
+    }
+
+    fn param_dis_string(t:&TypeString) -> String {
+        return format!("str:{}",t.value);
+    }
+
+    fn param_dis_word(t:&TypeWord,words:&Words) -> String {
+        return Self::disassemble_words(words,t.value);
+    }
+
+    fn param_dis_said(t:&Vec<TypeWord>,words:&Words) -> String {
+        let mut string = String::new();
+        for (index,w) in t.iter().enumerate() {
+            if index != 0 {
+                string+=",";
+            }
+            string+=Self::param_dis_word(w,words).as_str();
+        }
+        return string;
+    }
+
+    pub fn logic_args_disassemble(operation:&LogicOperation,words:&Words,items:&Objects) -> String {
+        return match operation {
+            LogicOperation::RightPosN(a) |
+            LogicOperation::PosN(a) |
+            LogicOperation::ObjInBox(a) => format!("{},{},{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3),Self::param_dis_num(&a.4)),
+            LogicOperation::Said(a) => Self::param_dis_said(&a.0, words),
+            LogicOperation::HaveKey(a) => String::from(""),
+            LogicOperation::Controller(a) => Self::param_dis_controller(&a.0),
+            LogicOperation::Has(a) => Self::param_dis_item(&a.0, items),
+            LogicOperation::IsSetV(a) => Self::param_dis_var(&a.0),
+            LogicOperation::IsSet(a) => Self::param_dis_flag(&a.0),
+            LogicOperation::GreaterV(a) |
+            LogicOperation::LessV(a) |
+            LogicOperation::EqualV(a) => return format!("{},{}",Self::param_dis_var(&a.0),Self::param_dis_var(&a.1)),
+            LogicOperation::GreaterN(a) |
+            LogicOperation::LessN(a) |
+            LogicOperation::EqualN(a) => return format!("{},{}",Self::param_dis_var(&a.0),Self::param_dis_num(&a.1)),
         }
     }
 
+    pub fn logic_operation_disassemble(operation:&LogicOperation,words:&Words,items:&Objects) -> String {
+        let string = Self::logic_args_disassemble(operation,words,items);
+        return String::new() + operation.into() + "(" + &string + ")";
+    }
+
+    pub fn logic_disassemble(logic:&Vec<LogicChange>,is_or:bool,words:&Words,items:&Objects) -> String {
+        let mut string = String::new();
+        for (index,l) in logic.iter().enumerate() {
+            if index!=0 {
+                if is_or {
+                    string = string + " || ";
+                } else {
+                    string = string + " && ";
+                }
+            }
+            string = string + &match l {
+                LogicChange::Normal((e,)) => Self::logic_operation_disassemble(e,words,items),
+                LogicChange::Not((e,)) => String::from("!")+Self::logic_operation_disassemble(e,words,items).as_str(),
+                LogicChange::Or((e,)) => String::from("( ")+Self::logic_disassemble(e,true,words,items).as_str()+" )",
+            };
+        }
+        return string;
+    }
+
+    pub fn instruction_disassemble(&self,action:&ActionOperation,words:&Words,items:&Objects) -> String {
+
+        let s:&'static str = action.into();
+        return match action {
+            ActionOperation::If((logic,_)) => format!("{} ( {} )",s, Self::logic_disassemble(logic,false,words,items)),
+            ActionOperation::Goto(a) => format!("{} label_{}",s, self.logic_sequence.labels[&a.0].2),
+            _ => format!("{} ( {} )",s,String::new()),
+        };
+    }
+
     pub fn disassemble(&self,items:&Objects,words:&Words) {
+
+        for g in &self.logic_sequence.labels {
+            println!("{:?}",g.0);
+        }
+
+        let mut indent = 2;
+        for (i,address) in &self.logic_sequence.operations {
+            if let Some((goto,end_if_cnt,pos)) = self.logic_sequence.labels.get(&address) {
+               for _ in 0..*end_if_cnt {
+                    indent-=2;
+                    println!("{:indent$}}}","",indent=indent);
+                }
+                if *goto {
+                    println!("label_{}:",pos);
+                } 
+            }
+
+            println!("{:indent$}{v}","",v=self.instruction_disassemble(&i,words,items),indent=indent);
+
+            match i {
+                ActionOperation::If(_) => { println!("{:indent$}{{","",indent=indent);indent+=2; }
+                _ => {}
+            }
+        }
 
     }
 /*
@@ -967,7 +1082,7 @@ impl LogicSequence {
 
         let mut iter = logic_slice.iter();
 
-        let mut operations:Vec<ActionOperation> = Vec::new();
+        let mut operations:Vec<(ActionOperation,TypeGoto)> = Vec::new();
         let mut offsets:HashMap<TypeGoto, usize>=HashMap::new();
         let mut offsets_rev:HashMap<usize, TypeGoto>=HashMap::new();
         let initial_size = logic_slice.len();
@@ -979,165 +1094,184 @@ impl LogicSequence {
         while let Some(b) = iter.next()
         {
             let program_position = initial_size - iter.as_slice().len() -1;
-            offsets.insert((program_position as i16).into(), operations.len());
-            offsets_rev.insert(operations.len(),(program_position as i16).into());
-            match b {
-                0xFF => operations.push(ActionOperation::If(Self::parse_vlogic_change_goto(&mut iter)?)),
-                0xFE => operations.push(ActionOperation::Goto((Self::parse_goto(&mut iter)?,))),
-                0x97 => operations.push(ActionOperation::PrintAtV0(Self::parse_message_num_num(&mut iter)?)),
-                0x96 => operations.push(ActionOperation::TraceInfo(Self::parse_num_num_num(&mut iter)?)),
-                0x94 => operations.push(ActionOperation::RepositionToV(Self::parse_object_var_var(&mut iter)?)),
-                0x93 => operations.push(ActionOperation::RepositionTo(Self::parse_object_num_num(&mut iter)?)),
-                0x8F => operations.push(ActionOperation::SetGameID((Self::parse_message(&mut iter)?,))),
-                0x8D => operations.push(ActionOperation::Version(())),
-                0x8C => operations.push(ActionOperation::ToggleMonitor(())),
-                0x8B => operations.push(ActionOperation::InitJoy(())),
-                0x8A => operations.push(ActionOperation::CancelLine(())),
-                0x89 => operations.push(ActionOperation::EchoLine(())),
-                0x88 => operations.push(ActionOperation::Pause(())),
-                0x87 => operations.push(ActionOperation::ShowMem(())),
-                0x86 => operations.push(ActionOperation::QuitV0(())),
-                0x85 => operations.push(ActionOperation::ObjStatusV((Self::parse_var(&mut iter)?,))),
-                0x84 => operations.push(ActionOperation::PlayerControl(())),
-                0x83 => operations.push(ActionOperation::ProgramControl(())),
-                0x82 => operations.push(ActionOperation::Random(Self::parse_num_num_var(&mut iter)?)),
-                0x81 => operations.push(ActionOperation::ShowObj((Self::parse_num(&mut iter)?,))),
-                0x80 => operations.push(ActionOperation::RestartGame(())),
-                0x7E => operations.push(ActionOperation::RestoreGame(())),
-                0x7D => operations.push(ActionOperation::SaveGame(())),
-                0x7C => operations.push(ActionOperation::Status(())),
-                0x7B => operations.push(ActionOperation::AddToPicV(Self::parse_var_var_var_var_var_var_var(&mut iter)?)),
-                0x7A => operations.push(ActionOperation::AddToPic(Self::parse_num_num_num_num_num_num_num(&mut iter)?)),
-                0x79 => operations.push(ActionOperation::SetKey(Self::parse_num_num_controller(&mut iter)?)),
-                0x78 => operations.push(ActionOperation::AcceptInput(())),
-                0x77 => operations.push(ActionOperation::PreventInput(())),
-                0x76 => operations.push(ActionOperation::GetNum(Self::parse_message_var(&mut iter)?)),
-                0x75 => operations.push(ActionOperation::Parse((Self::parse_string(&mut iter)?,))),
-                0x73 => operations.push(ActionOperation::GetString(Self::parse_string_message_num_num_num(&mut iter)?)),
-                0x72 => operations.push(ActionOperation::SetString(Self::parse_string_message(&mut iter)?)),
-                0x71 => operations.push(ActionOperation::StatusLineOff(())),
-                0x70 => operations.push(ActionOperation::StatusLineOn(())),
-                0x6F => operations.push(ActionOperation::ConfigureScreen(Self::parse_num_num_num(&mut iter)?)),
-                0x6E => operations.push(ActionOperation::ShakeScreen((Self::parse_num(&mut iter)?,))),
-                0x6D => operations.push(ActionOperation::SetTextAttribute(Self::parse_num_num(&mut iter)?)),
-                0x6C => operations.push(ActionOperation::SetCursorChar((Self::parse_message(&mut iter)?,))),
-                0x6B => operations.push(ActionOperation::Graphics(())),
-                0x6A => operations.push(ActionOperation::TextScreen(())),
-                0x69 => operations.push(ActionOperation::ClearLines(Self::parse_num_num_num(&mut iter)?)),
-                0x68 => operations.push(ActionOperation::DisplayV(Self::parse_var_var_var(&mut iter)?)),
-                0x67 => operations.push(ActionOperation::Display(Self::parse_num_num_message(&mut iter)?)),
-                0x66 => operations.push(ActionOperation::PrintV((Self::parse_var(&mut iter)?,))),
-                0x65 => operations.push(ActionOperation::Print((Self::parse_message(&mut iter)?,))),
-                0x64 => operations.push(ActionOperation::StopSound(())),
-                0x63 => operations.push(ActionOperation::Sound(Self::parse_num_flag(&mut iter)?)),
-                0x62 => operations.push(ActionOperation::LoadSound((Self::parse_num(&mut iter)?,))),
-                0x5E => operations.push(ActionOperation::Drop((Self::parse_item(&mut iter)?,))),
-                0x5D => operations.push(ActionOperation::GetV((Self::parse_var(&mut iter)?,))),
-                0x5C => operations.push(ActionOperation::Get((Self::parse_item(&mut iter)?,))),
-                0x5B => operations.push(ActionOperation::Unblock(())),
-                0x5A => operations.push(ActionOperation::Block(Self::parse_num_num_num_num(&mut iter)?)),
-                0x59 => operations.push(ActionOperation::ObserveBlocks((Self::parse_object(&mut iter)?,))),
-                0x58 => operations.push(ActionOperation::IgnoreBlocks((Self::parse_object(&mut iter)?,))),
-                0x56 => operations.push(ActionOperation::SetDir(Self::parse_object_var(&mut iter)?)),
-                0x55 => operations.push(ActionOperation::NormalMotion((Self::parse_object(&mut iter)?,))),
-                0x54 => operations.push(ActionOperation::Wander((Self::parse_object(&mut iter)?,))),
-                0x53 => operations.push(ActionOperation::FollowEgo(Self::parse_object_num_flag(&mut iter)?)),
-                0x52 => operations.push(ActionOperation::MoveObjV(Self::parse_object_var_var_var_flag(&mut iter)?)),
-                0x51 => operations.push(ActionOperation::MoveObj(Self::parse_object_num_num_num_flag(&mut iter)?)),
-                0x50 => operations.push(ActionOperation::StepTime(Self::parse_object_var(&mut iter)?)),
-                0x4F => operations.push(ActionOperation::StepSize(Self::parse_object_var(&mut iter)?)),
-                0x4E => operations.push(ActionOperation::StartMotion((Self::parse_object(&mut iter)?,))),
-                0x4D => operations.push(ActionOperation::StopMotion((Self::parse_object(&mut iter)?,))),
-                0x4C => operations.push(ActionOperation::CycleTime(Self::parse_object_var(&mut iter)?)),
-                0x4B => operations.push(ActionOperation::ReverseLoop(Self::parse_object_flag(&mut iter)?)),
-                0x49 => operations.push(ActionOperation::EndOfLoop(Self::parse_object_flag(&mut iter)?)),
-                0x47 => operations.push(ActionOperation::StartCycling((Self::parse_object(&mut iter)?,))),
-                0x46 => operations.push(ActionOperation::StopCycling((Self::parse_object(&mut iter)?,))),
-                0x45 => operations.push(ActionOperation::Distance(Self::parse_object_object_var(&mut iter)?)),
-                0x44 => operations.push(ActionOperation::ObserveObjs((Self::parse_object(&mut iter)?,))),
-                0x43 => operations.push(ActionOperation::IgnoreObjs((Self::parse_object(&mut iter)?,))),
-                0x41 => operations.push(ActionOperation::ObjectOnLand((Self::parse_object(&mut iter)?,))),
-                //0x40 => operations.push(ActionOperation::ObjectOnWater((Self::parse_object(&mut iter)?,))),
-                0x3F => operations.push(ActionOperation::SetHorizon((Self::parse_num(&mut iter)?,))),
-                0x3E => operations.push(ActionOperation::ObserveHorizon((Self::parse_object(&mut iter)?,))),
-                0x3D => operations.push(ActionOperation::IgnoreHorizon((Self::parse_object(&mut iter)?,))),
-                0x3C => operations.push(ActionOperation::ForceUpdate((Self::parse_object(&mut iter)?,))),
-                0x3B => operations.push(ActionOperation::StartUpdate((Self::parse_object(&mut iter)?,))),
-                0x3A => operations.push(ActionOperation::StopUpdate((Self::parse_object(&mut iter)?,))),
-                0x39 => operations.push(ActionOperation::GetPriority(Self::parse_object_var(&mut iter)?)),
-                0x38 => operations.push(ActionOperation::ReleasePriority((Self::parse_object(&mut iter)?,))),
-                //0x37 => operations.push(ActionOperation::SetPriorityV(Self::parse_object_var(&mut iter)?)),
-                0x36 => operations.push(ActionOperation::SetPriority(Self::parse_object_num(&mut iter)?)),
-                0x34 => operations.push(ActionOperation::CurrentView(Self::parse_object_var(&mut iter)?)),
-                0x33 => operations.push(ActionOperation::CurrentLoop(Self::parse_object_var(&mut iter)?)),
-                0x32 => operations.push(ActionOperation::CurrentCel(Self::parse_object_var(&mut iter)?)),
-                0x31 => operations.push(ActionOperation::LastCel(Self::parse_object_var(&mut iter)?)),
-                0x30 => operations.push(ActionOperation::SetCelV(Self::parse_object_var(&mut iter)?)),
-                0x2F => operations.push(ActionOperation::SetCel(Self::parse_object_num(&mut iter)?,)),
-                0x2E => operations.push(ActionOperation::ReleaseLoop((Self::parse_object(&mut iter)?,))),
-                0x2D => operations.push(ActionOperation::FixLoop((Self::parse_object(&mut iter)?,))),
-                0x2C => operations.push(ActionOperation::SetLoopV(Self::parse_object_var(&mut iter)?)),
-                0x2B => operations.push(ActionOperation::SetLoop(Self::parse_object_num(&mut iter)?)),
-                0x2A => operations.push(ActionOperation::SetViewV(Self::parse_object_var(&mut iter)?)),
-                0x29 => operations.push(ActionOperation::SetView(Self::parse_object_num(&mut iter)?)),
-                0x28 => operations.push(ActionOperation::Reposition(Self::parse_object_var_var(&mut iter)?)),
-                0x27 => operations.push(ActionOperation::GetPosN(Self::parse_object_var_var(&mut iter)?)),
-                0x26 => operations.push(ActionOperation::PositionV(Self::parse_object_var_var(&mut iter)?)),
-                0x25 => operations.push(ActionOperation::Position(Self::parse_object_num_num(&mut iter)?)),
-                0x24 => operations.push(ActionOperation::Erase((Self::parse_object(&mut iter)?,))),
-                0x23 => operations.push(ActionOperation::Draw((Self::parse_object(&mut iter)?,))),
-                0x22 => operations.push(ActionOperation::UnanimateAll(())),
-                0x21 => operations.push(ActionOperation::AnimateObj((Self::parse_object(&mut iter)?,))),
-                0x20 => operations.push(ActionOperation::DiscardView((Self::parse_num(&mut iter)?,))),
-                0x1F => operations.push(ActionOperation::LoadViewV((Self::parse_var(&mut iter)?,))),
-                0x1E => operations.push(ActionOperation::LoadView((Self::parse_num(&mut iter)?,))),
-                0x1D => operations.push(ActionOperation::ShowPriScreen(())),
-                0x1B => operations.push(ActionOperation::DiscardPic((Self::parse_var(&mut iter)?,))),
-                0x1A => operations.push(ActionOperation::ShowPic(())),
-                0x19 => operations.push(ActionOperation::DrawPic((Self::parse_var(&mut iter)?,))),
-                0x18 => operations.push(ActionOperation::LoadPic((Self::parse_var(&mut iter)?,))),
-                0x17 => operations.push(ActionOperation::CallV((Self::parse_var(&mut iter)?,))),
-                0x16 => operations.push(ActionOperation::Call((Self::parse_num(&mut iter)?,))),
-                0x14 => operations.push(ActionOperation::LoadLogic((Self::parse_num(&mut iter)?,))),
-                0x13 => operations.push(ActionOperation::NewRoomV((Self::parse_var(&mut iter)?,))),
-                0x12 => operations.push(ActionOperation::NewRoom((Self::parse_num(&mut iter)?,))),
-                0x10 => operations.push(ActionOperation::ResetV((Self::parse_var(&mut iter)?,))),
-                0x0F => operations.push(ActionOperation::SetV((Self::parse_var(&mut iter)?,))),
-                0x0E => operations.push(ActionOperation::Toggle((Self::parse_flag(&mut iter)?,))),
-                0x0D => operations.push(ActionOperation::Reset((Self::parse_flag(&mut iter)?,))),
-                0x0C => operations.push(ActionOperation::Set((Self::parse_flag(&mut iter)?,))),
-                0x0B => operations.push(ActionOperation::LIndirectN(Self::parse_var_num(&mut iter)?)),
-                0x0A => operations.push(ActionOperation::RIndirect(Self::parse_var_var(&mut iter)?)),
-                0x09 => operations.push(ActionOperation::LIndirectV(Self::parse_var_var(&mut iter)?)),
-                0x08 => operations.push(ActionOperation::SubV(Self::parse_var_var(&mut iter)?)),
-                0x07 => operations.push(ActionOperation::SubN(Self::parse_var_num(&mut iter)?)),
-                0x06 => operations.push(ActionOperation::AddV(Self::parse_var_var(&mut iter)?)),
-                0x05 => operations.push(ActionOperation::AddN(Self::parse_var_num(&mut iter)?)),
-                0x04 => operations.push(ActionOperation::AssignV(Self::parse_var_var(&mut iter)?)),
-                0x03 => operations.push(ActionOperation::AssignN(Self::parse_var_num(&mut iter)?)),
-                0x02 => operations.push(ActionOperation::Decrement((Self::parse_var(&mut iter)?,))),
-                0x01 => operations.push(ActionOperation::Increment((Self::parse_var(&mut iter)?,))),
-                0x00 => operations.push(ActionOperation::Return(())),
+            let byte_position_as_goto:TypeGoto = (program_position as i16).into();
+            offsets.insert(byte_position_as_goto, operations.len());
+            offsets_rev.insert(operations.len(),byte_position_as_goto);
+            let action = match b {
+                0xFF => ActionOperation::If(Self::parse_vlogic_change_goto(&mut iter)?),
+                0xFE => ActionOperation::Goto((Self::parse_goto(&mut iter)?,)),
+                0x97 => ActionOperation::PrintAtV0(Self::parse_message_num_num(&mut iter)?),
+                0x96 => ActionOperation::TraceInfo(Self::parse_num_num_num(&mut iter)?),
+                0x94 => ActionOperation::RepositionToV(Self::parse_object_var_var(&mut iter)?),
+                0x93 => ActionOperation::RepositionTo(Self::parse_object_num_num(&mut iter)?),
+                0x8F => ActionOperation::SetGameID((Self::parse_message(&mut iter)?,)),
+                0x8D => ActionOperation::Version(()),
+                0x8C => ActionOperation::ToggleMonitor(()),
+                0x8B => ActionOperation::InitJoy(()),
+                0x8A => ActionOperation::CancelLine(()),
+                0x89 => ActionOperation::EchoLine(()),
+                0x88 => ActionOperation::Pause(()),
+                0x87 => ActionOperation::ShowMem(()),
+                0x86 => ActionOperation::QuitV0(()),
+                0x85 => ActionOperation::ObjStatusV((Self::parse_var(&mut iter)?,)),
+                0x84 => ActionOperation::PlayerControl(()),
+                0x83 => ActionOperation::ProgramControl(()),
+                0x82 => ActionOperation::Random(Self::parse_num_num_var(&mut iter)?),
+                0x81 => ActionOperation::ShowObj((Self::parse_num(&mut iter)?,)),
+                0x80 => ActionOperation::RestartGame(()),
+                0x7E => ActionOperation::RestoreGame(()),
+                0x7D => ActionOperation::SaveGame(()),
+                0x7C => ActionOperation::Status(()),
+                0x7B => ActionOperation::AddToPicV(Self::parse_var_var_var_var_var_var_var(&mut iter)?),
+                0x7A => ActionOperation::AddToPic(Self::parse_num_num_num_num_num_num_num(&mut iter)?),
+                0x79 => ActionOperation::SetKey(Self::parse_num_num_controller(&mut iter)?),
+                0x78 => ActionOperation::AcceptInput(()),
+                0x77 => ActionOperation::PreventInput(()),
+                0x76 => ActionOperation::GetNum(Self::parse_message_var(&mut iter)?),
+                0x75 => ActionOperation::Parse((Self::parse_string(&mut iter)?,)),
+                0x73 => ActionOperation::GetString(Self::parse_string_message_num_num_num(&mut iter)?),
+                0x72 => ActionOperation::SetString(Self::parse_string_message(&mut iter)?),
+                0x71 => ActionOperation::StatusLineOff(()),
+                0x70 => ActionOperation::StatusLineOn(()),
+                0x6F => ActionOperation::ConfigureScreen(Self::parse_num_num_num(&mut iter)?),
+                0x6E => ActionOperation::ShakeScreen((Self::parse_num(&mut iter)?,)),
+                0x6D => ActionOperation::SetTextAttribute(Self::parse_num_num(&mut iter)?),
+                0x6C => ActionOperation::SetCursorChar((Self::parse_message(&mut iter)?,)),
+                0x6B => ActionOperation::Graphics(()),
+                0x6A => ActionOperation::TextScreen(()),
+                0x69 => ActionOperation::ClearLines(Self::parse_num_num_num(&mut iter)?),
+                0x68 => ActionOperation::DisplayV(Self::parse_var_var_var(&mut iter)?),
+                0x67 => ActionOperation::Display(Self::parse_num_num_message(&mut iter)?),
+                0x66 => ActionOperation::PrintV((Self::parse_var(&mut iter)?,)),
+                0x65 => ActionOperation::Print((Self::parse_message(&mut iter)?,)),
+                0x64 => ActionOperation::StopSound(()),
+                0x63 => ActionOperation::Sound(Self::parse_num_flag(&mut iter)?),
+                0x62 => ActionOperation::LoadSound((Self::parse_num(&mut iter)?,)),
+                0x5E => ActionOperation::Drop((Self::parse_item(&mut iter)?,)),
+                0x5D => ActionOperation::GetV((Self::parse_var(&mut iter)?,)),
+                0x5C => ActionOperation::Get((Self::parse_item(&mut iter)?,)),
+                0x5B => ActionOperation::Unblock(()),
+                0x5A => ActionOperation::Block(Self::parse_num_num_num_num(&mut iter)?),
+                0x59 => ActionOperation::ObserveBlocks((Self::parse_object(&mut iter)?,)),
+                0x58 => ActionOperation::IgnoreBlocks((Self::parse_object(&mut iter)?,)),
+                0x56 => ActionOperation::SetDir(Self::parse_object_var(&mut iter)?),
+                0x55 => ActionOperation::NormalMotion((Self::parse_object(&mut iter)?,)),
+                0x54 => ActionOperation::Wander((Self::parse_object(&mut iter)?,)),
+                0x53 => ActionOperation::FollowEgo(Self::parse_object_num_flag(&mut iter)?),
+                0x52 => ActionOperation::MoveObjV(Self::parse_object_var_var_var_flag(&mut iter)?),
+                0x51 => ActionOperation::MoveObj(Self::parse_object_num_num_num_flag(&mut iter)?),
+                0x50 => ActionOperation::StepTime(Self::parse_object_var(&mut iter)?),
+                0x4F => ActionOperation::StepSize(Self::parse_object_var(&mut iter)?),
+                0x4E => ActionOperation::StartMotion((Self::parse_object(&mut iter)?,)),
+                0x4D => ActionOperation::StopMotion((Self::parse_object(&mut iter)?,)),
+                0x4C => ActionOperation::CycleTime(Self::parse_object_var(&mut iter)?),
+                0x4B => ActionOperation::ReverseLoop(Self::parse_object_flag(&mut iter)?),
+                0x49 => ActionOperation::EndOfLoop(Self::parse_object_flag(&mut iter)?),
+                0x47 => ActionOperation::StartCycling((Self::parse_object(&mut iter)?,)),
+                0x46 => ActionOperation::StopCycling((Self::parse_object(&mut iter)?,)),
+                0x45 => ActionOperation::Distance(Self::parse_object_object_var(&mut iter)?),
+                0x44 => ActionOperation::ObserveObjs((Self::parse_object(&mut iter)?,)),
+                0x43 => ActionOperation::IgnoreObjs((Self::parse_object(&mut iter)?,)),
+                0x41 => ActionOperation::ObjectOnLand((Self::parse_object(&mut iter)?,)),
+                //0x40 => ActionOperation::ObjectOnWater((Self::parse_object(&mut iter)?,)),
+                0x3F => ActionOperation::SetHorizon((Self::parse_num(&mut iter)?,)),
+                0x3E => ActionOperation::ObserveHorizon((Self::parse_object(&mut iter)?,)),
+                0x3D => ActionOperation::IgnoreHorizon((Self::parse_object(&mut iter)?,)),
+                0x3C => ActionOperation::ForceUpdate((Self::parse_object(&mut iter)?,)),
+                0x3B => ActionOperation::StartUpdate((Self::parse_object(&mut iter)?,)),
+                0x3A => ActionOperation::StopUpdate((Self::parse_object(&mut iter)?,)),
+                0x39 => ActionOperation::GetPriority(Self::parse_object_var(&mut iter)?),
+                0x38 => ActionOperation::ReleasePriority((Self::parse_object(&mut iter)?,)),
+                //0x37 => ActionOperation::SetPriorityV(Self::parse_object_var(&mut iter)?),
+                0x36 => ActionOperation::SetPriority(Self::parse_object_num(&mut iter)?),
+                0x34 => ActionOperation::CurrentView(Self::parse_object_var(&mut iter)?),
+                0x33 => ActionOperation::CurrentLoop(Self::parse_object_var(&mut iter)?),
+                0x32 => ActionOperation::CurrentCel(Self::parse_object_var(&mut iter)?),
+                0x31 => ActionOperation::LastCel(Self::parse_object_var(&mut iter)?),
+                0x30 => ActionOperation::SetCelV(Self::parse_object_var(&mut iter)?),
+                0x2F => ActionOperation::SetCel(Self::parse_object_num(&mut iter)?,),
+                0x2E => ActionOperation::ReleaseLoop((Self::parse_object(&mut iter)?,)),
+                0x2D => ActionOperation::FixLoop((Self::parse_object(&mut iter)?,)),
+                0x2C => ActionOperation::SetLoopV(Self::parse_object_var(&mut iter)?),
+                0x2B => ActionOperation::SetLoop(Self::parse_object_num(&mut iter)?),
+                0x2A => ActionOperation::SetViewV(Self::parse_object_var(&mut iter)?),
+                0x29 => ActionOperation::SetView(Self::parse_object_num(&mut iter)?),
+                0x28 => ActionOperation::Reposition(Self::parse_object_var_var(&mut iter)?),
+                0x27 => ActionOperation::GetPosN(Self::parse_object_var_var(&mut iter)?),
+                0x26 => ActionOperation::PositionV(Self::parse_object_var_var(&mut iter)?),
+                0x25 => ActionOperation::Position(Self::parse_object_num_num(&mut iter)?),
+                0x24 => ActionOperation::Erase((Self::parse_object(&mut iter)?,)),
+                0x23 => ActionOperation::Draw((Self::parse_object(&mut iter)?,)),
+                0x22 => ActionOperation::UnanimateAll(()),
+                0x21 => ActionOperation::AnimateObj((Self::parse_object(&mut iter)?,)),
+                0x20 => ActionOperation::DiscardView((Self::parse_num(&mut iter)?,)),
+                0x1F => ActionOperation::LoadViewV((Self::parse_var(&mut iter)?,)),
+                0x1E => ActionOperation::LoadView((Self::parse_num(&mut iter)?,)),
+                0x1D => ActionOperation::ShowPriScreen(()),
+                0x1B => ActionOperation::DiscardPic((Self::parse_var(&mut iter)?,)),
+                0x1A => ActionOperation::ShowPic(()),
+                0x19 => ActionOperation::DrawPic((Self::parse_var(&mut iter)?,)),
+                0x18 => ActionOperation::LoadPic((Self::parse_var(&mut iter)?,)),
+                0x17 => ActionOperation::CallV((Self::parse_var(&mut iter)?,)),
+                0x16 => ActionOperation::Call((Self::parse_num(&mut iter)?,)),
+                0x14 => ActionOperation::LoadLogic((Self::parse_num(&mut iter)?,)),
+                0x13 => ActionOperation::NewRoomV((Self::parse_var(&mut iter)?,)),
+                0x12 => ActionOperation::NewRoom((Self::parse_num(&mut iter)?,)),
+                0x10 => ActionOperation::ResetV((Self::parse_var(&mut iter)?,)),
+                0x0F => ActionOperation::SetV((Self::parse_var(&mut iter)?,)),
+                0x0E => ActionOperation::Toggle((Self::parse_flag(&mut iter)?,)),
+                0x0D => ActionOperation::Reset((Self::parse_flag(&mut iter)?,)),
+                0x0C => ActionOperation::Set((Self::parse_flag(&mut iter)?,)),
+                0x0B => ActionOperation::LIndirectN(Self::parse_var_num(&mut iter)?),
+                0x0A => ActionOperation::RIndirect(Self::parse_var_var(&mut iter)?),
+                0x09 => ActionOperation::LIndirectV(Self::parse_var_var(&mut iter)?),
+                0x08 => ActionOperation::SubV(Self::parse_var_var(&mut iter)?),
+                0x07 => ActionOperation::SubN(Self::parse_var_num(&mut iter)?),
+                0x06 => ActionOperation::AddV(Self::parse_var_var(&mut iter)?),
+                0x05 => ActionOperation::AddN(Self::parse_var_num(&mut iter)?),
+                0x04 => ActionOperation::AssignV(Self::parse_var_var(&mut iter)?),
+                0x03 => ActionOperation::AssignN(Self::parse_var_num(&mut iter)?),
+                0x02 => ActionOperation::Decrement((Self::parse_var(&mut iter)?,)),
+                0x01 => ActionOperation::Increment((Self::parse_var(&mut iter)?,)),
+                0x00 => ActionOperation::Return(()),
                 _ => {panic!("Unimplemented action {b:02X}");}
-            }
+            };
+            operations.push((action,byte_position_as_goto));
         }
 
-        let mut labels:HashMap<TypeGoto, (bool,usize)>=HashMap::new();
+        let mut labels:HashMap<TypeGoto, (bool,u16,usize)>=HashMap::new();
         labels.reserve(operations.len());
-        for (index,op) in operations.iter().enumerate() {
+        for (index,(op,_)) in operations.iter_mut().enumerate() {
+            let is_goto= match op {
+                ActionOperation::Goto(_) => true,
+                _ => false,
+            };
+
+            let mut destination:TypeGoto = 0i16.into();
             match op {
-                ActionOperation::Goto((g,)) => {
-                    let base_offset=offsets_rev[&(index+1)];
-                    let destination:TypeGoto = base_offset+*g;
-                    labels.insert(*g, (true,offsets[&destination]));
+                ActionOperation::Goto((g,)) | ActionOperation::If((_,g)) => {
+                    let base_offset=offsets_rev.get(&(index+1)).unwrap();
+                    destination = *base_offset+*g;
+                    if labels.contains_key(&destination) {
+                        if labels[&destination].2 != offsets[&destination] {
+                            panic!("WUT!");
+                        }
+                        if is_goto {
+                            labels.get_mut(&destination).unwrap().0=true;
+                        } else {
+                            labels.get_mut(&destination).unwrap().1+=1;
+                        }
+                    } else {
+                        labels.insert(destination, (is_goto,if !is_goto {1} else {0},offsets[&destination]));
+                    }
                 },
-                ActionOperation::If((_,g)) => {
-                    let base_offset=offsets_rev[&(index+1)];
-                    let destination:TypeGoto = base_offset+*g;
-                    labels.insert(*g, (false,offsets[&destination]));
-                }
                 _ => {},
             }
+            match op {
+                ActionOperation::Goto(a) => a.0 = destination,
+                ActionOperation::If(a) => a.1 = destination,
+                _ => {},
+            };
         }
 
         operations.shrink_to_fit();
