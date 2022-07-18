@@ -30,12 +30,13 @@ fn dump_picture_resource(root:&Root,entry:&ResourceDirectoryEntry, index:usize) 
 
     let volume = Volume::new(bytes.into_iter()).unwrap();
 
-    let picture = match PictureResource::new(&volume,entry) {
+    let picture_resource = match PictureResource::new(&volume,entry) {
         Ok(b) => b,
         Err(s) => panic!("Failed due to : {}", s),
     };
+    let (picture,priority) = picture_resource.render().unwrap();
     
-    let doubled_width = double_width(&&picture.picture);
+    let doubled_width = double_width(&picture);
 
     let rgba = conv_rgba(&doubled_width);
 
@@ -44,7 +45,7 @@ fn dump_picture_resource(root:&Root,entry:&ResourceDirectoryEntry, index:usize) 
 
     dump_png(format!("../{}-picture.png",index).as_str(),width*2,height,&rgba);
 
-    let doubled_width = double_width(&&&picture.priority);
+    let doubled_width = double_width(&priority);
 
     let rgba = conv_greyscale(&doubled_width);
 

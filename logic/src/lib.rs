@@ -7,6 +7,11 @@ use words::Words;
 
 use strum_macros::IntoStaticStr;
 
+pub struct LogicState {
+    pub flag:[bool;256],
+    pub var:[u8;256],
+}
+
 pub struct LogicResource {
     logic_sequence:LogicSequence,
     logic_messages:LogicMessages,

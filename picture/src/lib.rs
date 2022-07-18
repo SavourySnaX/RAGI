@@ -8,24 +8,29 @@ pub const HEIGHT:u8 = 168;
 
 pub struct PictureResource
 {
-    pub picture: Vec<u8>,
-    pub priority: Vec<u8>,
+    picture_data:Vec<u8>,
 }
 
 impl PictureResource {
     pub fn new(volume:&Volume, entry: &ResourceDirectoryEntry) -> Result<PictureResource, String> {
+
+        let picture_data = volume.fetch_data_slice(entry)?.to_vec();
+        return Ok(PictureResource { picture_data });
+    }
+
+    pub fn render(&self) -> Result<(Vec<u8>,Vec<u8>), String> {
         let width:usize=WIDTH.into();
         let height:usize=HEIGHT.into();
         let mut picture = vec![15u8;(width*height) as usize];
         let mut priority = vec![4u8;(width*height) as usize];
-        draw_picture(volume,entry,&mut picture,&mut priority)?;
-        return Ok(PictureResource { picture,priority });
+        draw_picture(&self.picture_data,&mut picture,&mut priority)?;
+        return Ok((picture,priority));
     }
 }
 
-pub fn draw_picture(volume:&Volume, entry: &ResourceDirectoryEntry, picture:&mut Vec<u8>, priority:&mut Vec<u8>) -> Result<(), String> {
+fn draw_picture(picture_data:&Vec<u8>, picture:&mut Vec<u8>, priority:&mut Vec<u8>) -> Result<(), String> {
 
-    let mut volume_iter = volume.fetch_data_slice(entry).unwrap().iter().peekable();
+    let mut volume_iter = picture_data.iter().peekable();
 
     let mut colour_pen=15u8;
     let mut priority_pen=4u8;
@@ -38,10 +43,10 @@ pub fn draw_picture(volume:&Volume, entry: &ResourceDirectoryEntry, picture:&mut
 
     while let Some(b) = volume_iter.next() {
         match b {
-            0xF0 => { colour_on=true; colour_pen=*volume_iter.next().unwrap(); println!("Change picture color, color pen down : {}",colour_pen) },
-            0xF1 => { colour_on=false; println!("Color pen up"); },
-            0xF2 => { priority_on=true; priority_pen=*volume_iter.next().unwrap(); println!("Change priority color, priority pen down : {}",priority_pen); },
-            0xF3 => { priority_on=false; println!("Priority pen up"); },
+            0xF0 => { colour_on=true; colour_pen=*volume_iter.next().unwrap(); },
+            0xF1 => { colour_on=false; },
+            0xF2 => { priority_on=true; priority_pen=*volume_iter.next().unwrap(); },
+            0xF3 => { priority_on=false; },
             0xF4 => { alternate_line(picture,priority,colour_on,priority_on,colour_pen,priority_pen,&mut volume_iter, false); }
             0xF5 => { alternate_line(picture,priority,colour_on,priority_on,colour_pen,priority_pen,&mut volume_iter, true); }
             0xF6 => { absolute_line(picture,priority,colour_on,priority_on,colour_pen,priority_pen,&mut volume_iter); },
@@ -198,8 +203,6 @@ where I: Iterator<Item = &'a u8> {
         }
         x=!x;
 
-        println!("Alternating Line : {} {},{} -> {},{}",n,x0,y0,x1,y1);
-
         rasterise_line(picture, priority, colour_on, priority_on, colour_pen, priority_pen, (*x0).into(), (*y0).into(), (*x1).into(), (*y1).into());
 
         x0=x1;
@@ -222,8 +225,6 @@ where I: Iterator<Item = &'a u8> {
         }
         let x1 = volume_iter.next().unwrap();
         let y1 = volume_iter.next().unwrap();
-
-        println!("Absolute Line : {},{} -> {},{}",x0,y0,x1,y1);
 
         rasterise_line(picture, priority, colour_on, priority_on, colour_pen, priority_pen, (*x0).into(), (*y0).into(), (*x1).into(), (*y1).into());
 
@@ -256,8 +257,6 @@ where I: Iterator<Item = &'a u8> {
         let x1 = x0 + decode_relative(rel>>4);
         let y1 = y0 + decode_relative(rel&0x0F);
 
-        println!("Relative Line : {} {},{} -> {},{}",rel,x0,y0,x1,y1);
-
         rasterise_line(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x0, y0, x1, y1);
 
         x0=x1;
@@ -275,8 +274,6 @@ where I: Iterator<Item = &'a u8> {
         }
         let x = volume_iter.next().unwrap();
         let y = volume_iter.next().unwrap();
-
-        println!("Fill at : {},{}",x,y);
 
         if colour_on || priority_on {
             rasterise_fill(picture, priority, colour_on, priority_on, colour_pen, priority_pen, *x, *y);
@@ -297,8 +294,6 @@ where I: Iterator<Item = &'a u8> {
         }
         let x = volume_iter.next().unwrap();
         let y = volume_iter.next().unwrap();
-
-        println!("Plot Pen at : {},{}",x,y);
 
         rasterise_plot_pen(picture, priority, colour_on, priority_on, colour_pen, priority_pen, plot_pen_size, plot_pen_splatter, plot_pen_rectangle, (*x).into(), (*y).into());
     }

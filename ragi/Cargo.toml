@@ -6,4 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+dir_resource = {path = "../dir_resource"}
+volume = {path = "../volume"}
+helpers = {path = "../helpers"}
+logic = {path = "../logic"}
+objects = {path = "../objects"}
+picture = {path = "../picture"}
+view = {path = "../view"}
+words = {path = "../words"}
 sdl2 = "0.35.2"

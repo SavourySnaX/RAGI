@@ -177,7 +177,15 @@ dependencies = [
 name = "ragi"
 version = "0.1.0"
 dependencies = [
+ "dir_resource",
+ "helpers",
+ "logic",
+ "objects",
+ "picture",
  "sdl2",
+ "view",
+ "volume",
+ "words",
 ]
 
 [[package]]
