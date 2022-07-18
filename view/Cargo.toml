@@ -8,4 +8,4 @@ edition = "2021"
 [dependencies]
 dir_resource = {path = "../dir_resource"}
 volume = {path = "../volume"}
-"png" = "0.17.5"
+helpers = {path = "../helpers"}

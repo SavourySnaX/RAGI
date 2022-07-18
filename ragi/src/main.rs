@@ -2,7 +2,6 @@ use sdl2::pixels::Color;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
-use std::borrow::BorrowMut;
 use std::time::Duration;
 
 fn main() -> Result<(), String> {
@@ -23,7 +22,7 @@ fn main() -> Result<(), String> {
     let mut event_pump = sdl_context.event_pump()?;
 
     let tex_creator = canvas.texture_creator();
-    let mut game_tex = tex_creator.create_texture(sdl2::pixels::PixelFormatEnum::ARGB8888, sdl2::render::TextureAccess::Streaming, 320, 200).unwrap();
+    let mut foreground = tex_creator.create_texture(sdl2::pixels::PixelFormatEnum::ARGB8888, sdl2::render::TextureAccess::Streaming, 320, 200).unwrap();
 
     let mut vec:Vec<u8> = Vec::new();
     vec.reserve(320*200*4);
@@ -34,7 +33,7 @@ fn main() -> Result<(), String> {
         vec.push(255u8);
     }
 
-    game_tex.update(None, &vec[..], 320*4).unwrap();
+    foreground.update(None, &vec[..], 320*4).unwrap();
     'running: loop {
         canvas.set_draw_color(Color::RGB(0, 0, 0));
         canvas.clear();
@@ -49,7 +48,7 @@ fn main() -> Result<(), String> {
         }
         // The rest of the game loop goes here...
 
-        canvas.copy(&game_tex, None, Rect::new(0,0,320,200));
+        canvas.copy(&foreground, None, Rect::new(0,0,320,200)).unwrap();
 
         canvas.present();
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
