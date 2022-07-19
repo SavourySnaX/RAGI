@@ -1,6 +1,6 @@
 use dir_resource::ResourceDirectory;
 use helpers::{Root, double_width, conv_rgba, dump_png};
-use logic::{LogicResource, ActionOperation, LogicState};
+use logic::{LogicResource, ActionOperation, LogicOperation, LogicChange, LogicSequence, ConditionOperation, LogicState, LogicExecutionPosition, TypeFlag};
 use objects::Objects;
 use picture::PictureResource;
 use sdl2::pixels::Color;
@@ -16,7 +16,7 @@ use std::time::Duration;
 
 fn main() -> Result<(), String> {
 
-    let interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/").unwrap();
+    let mut interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/").unwrap();
 
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -69,6 +69,7 @@ fn main() -> Result<(), String> {
             }
         }
         // The rest of the game loop goes here...
+        interpretter.run();
 
         canvas.copy(&foreground, None, Rect::new(0,0,320,200)).unwrap();
 
@@ -146,18 +147,45 @@ impl Interpretter {
             views,
             pictures,
             logic,
-            state: LogicState {
-                flag: [false;256],
-                var: [0u8;256],
-            }
+            state: LogicState::new(),
         });
     }
 
-    pub fn run(&self) {
-/*         self.logic[&0].action_args_disassemble(action, words, items)
-        let iter = self.logic[&0].  .logic_sequence;
-        while let Some(action) = iter.next() {
-            self.interpret_instruction(action);
-        }*/
+    pub fn do_call(state:&mut LogicState, entry:&LogicExecutionPosition, logics:&HashMap<usize,LogicResource>) {
+        let logic_sequence = logics[&entry.get_logic()].get_logic_sequence();
+        let actions = logic_sequence.get_operations();
+        let mut exec = *entry;
+        loop {
+            match logic_sequence.interpret_instructions(state,&exec,&actions) {
+                Some(newpc) => {
+                    if newpc.is_call(entry.get_logic()) {
+                        Self::do_call(state,&newpc,logics);
+                        exec=exec.next();
+                    } else {
+                        exec = newpc;
+                    }
+                },
+                None => break,
+            }
+        }
+    }
+
+    pub fn call(state:&mut LogicState,logic_file:usize, logics:&HashMap<usize,LogicResource>) {
+
+        let exec = LogicExecutionPosition::new(logic_file,0);
+        Self::do_call(state,&exec,logics);
+    }
+
+    pub fn run(&mut self) {
+
+        let mutable_state = &mut self.state;
+
+        loop {
+            Self::call(mutable_state, 0, &self.logic);
+            if !mutable_state.get_flag(&TypeFlag::from(5)) {
+                mutable_state.set_flag(&TypeFlag::from(5), false);
+                break;
+            }
+        }
     }
 }

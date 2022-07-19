@@ -12,6 +12,11 @@ pub struct Objects
 }
 
 impl Objects {
+
+    pub fn blank() -> Objects {
+        return Objects { max_objects: 0x2A, objects:Vec::new()}
+    }
+
     pub fn new(bytes: &Vec<u8>) -> Result<Objects,&'static str> {
 
         let mut objects:Vec<Object> = Vec::new();
@@ -25,6 +30,10 @@ impl Objects {
             if let Some(b) = iter.next() {
                 let msb:usize = (*b).into();
                 let pos:usize = (msb<<8)+lsb;
+
+                if pos>bytes_slice.len() {
+                    return Err("corrupted objects file");
+                }
 
                 let bytes_slice=&iter.as_slice()[..=pos];
                 let mut iter = bytes_slice.iter();

@@ -58,6 +58,9 @@ impl IntoIterator for Words {
 }
 
 impl Words {
+    pub fn blank() -> Words {
+        return Words {words:HashMap::new()};
+    }
     pub fn new(bytes: impl Iterator<Item = u8>) -> Result<Words,&'static str> {
 
         let mut words: HashMap<String,u16> = HashMap::new();

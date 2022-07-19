@@ -7,9 +7,134 @@ use words::Words;
 
 use strum_macros::IntoStaticStr;
 
+#[derive(Debug,Copy,Clone)] // TODO revisit copy
+pub struct Sprite {
+    active:bool,
+    observing:bool, // treats other objects as obsticles
+    cycle:bool,     // cycle loop automatically
+    view:u8,
+    cloop:u8,
+    cel:u8,
+    x:u8,           // bottom left corner
+    y:u8,
+    priority:u8,
+}
+
+impl Sprite {
+    pub fn new() -> Sprite {
+        return Sprite { 
+            active: false, 
+            observing: false, 
+            cycle: false, 
+            view: 0, 
+            cloop: 0,
+            cel: 0,
+            x:0, 
+            y:0,
+            priority:0,
+        };
+    }
+
+    pub fn get_x(&self) -> u8 {
+        return self.x;
+    }
+    
+    pub fn get_y(&self) -> u8 {
+        return self.y;
+    }
+
+    pub fn set_active(&mut self,b:bool) {
+        self.active=b;
+    }
+
+    pub fn set_view(&mut self, view:u8) {
+        self.view = view;
+    }
+
+    pub fn set_observing(&mut self,b:bool) {
+        self.observing=b;
+    }
+
+    pub fn set_cycling(&mut self,b:bool) {
+        self.cycle=b;
+    }
+
+    pub fn set_x(&mut self,n:u8) {
+        self.x = n;
+    }
+    
+    pub fn set_y(&mut self,n:u8) {
+        self.y = n;
+    }
+    
+    pub fn set_priority(&mut self,n:u8) {
+        self.priority = n;
+    }
+   
+    pub fn set_loop(&mut self,n:u8) {
+        self.cloop = n;
+    }
+    
+    pub fn set_cel(&mut self,n:u8) {
+        self.cel = n;
+    }
+
+}
+
+#[derive(Debug)]
 pub struct LogicState {
-    pub flag:[bool;256],
-    pub var:[u8;256],
+    input:bool,
+    horizon:u8,
+    flag:[bool;256],
+    var:[u8;256],
+    objects:[Sprite;256],   // overkill, todo add list of active
+}
+
+impl LogicState {
+    pub fn new() -> LogicState {
+        return LogicState {
+            input: false,
+            horizon: 0,
+            flag: [false;256],
+            var: [0u8;256],
+            objects: [Sprite::new();256],
+        }
+    }
+    pub fn get_flag(&self,f:&TypeFlag) -> bool {
+        return self.flag[f.value as usize];
+    }
+
+    pub fn get_var(&self,v:&TypeVar) -> u8 {
+        return self.var[v.value as usize];
+    }
+
+    pub fn get_num(&self,v:&TypeNum) -> u8 {
+        return v.value;
+    }
+
+    pub fn set_var(&mut self,v:&TypeVar,n:u8) {
+        self.var[v.value as usize] = n;
+    }
+
+    pub fn set_flag(&mut self,f:&TypeFlag,n:bool) {
+        self.flag[f.value as usize] = n;
+    }
+    
+    pub fn set_input(&mut self,b:bool) {
+        self.input = b;
+    }
+    
+    pub fn set_horizon(&mut self,h:u8) {
+        self.horizon = h;
+    }
+
+    pub fn object(&self,o:&TypeObject) -> &Sprite {
+        return &self.objects[o.value as usize];
+    }
+
+    pub fn mut_object(&mut self,o:&TypeObject) -> &mut Sprite {
+        return &mut self.objects[o.value as usize];
+    }
 }
 
 pub struct LogicResource {
@@ -21,20 +146,31 @@ pub struct LogicMessages {
     pub strings:Vec<String>,
 }
 
+pub struct LogicOperation {
+    pub action:ActionOperation,
+    pub address:TypeGoto,
+}
+
+pub struct Label {
+    is_goto_destination:bool,
+    if_destination_cnt:u16,
+    operation_offset:usize,
+}
+
 pub struct LogicSequence {
-    operations:Vec<(ActionOperation,TypeGoto)>,
-    labels:HashMap<TypeGoto,(bool,u16,usize)>,
+    operations:Vec<LogicOperation>,
+    labels:HashMap<TypeGoto,Label>,
 }
 
 #[duplicate_item(name; [TypeFlag]; [TypeNum]; [TypeVar]; [TypeObject]; [TypeController]; [TypeMessage]; [TypeString]; [TypeItem])]
-#[derive(Clone,Copy)]
+#[derive(Clone,Copy,Debug)]
 #[allow(dead_code)]
 pub struct name {
     value:u8,
 }
 
 
-#[derive(Clone,Copy)]
+#[derive(Clone,Copy,Debug)]
 pub struct TypeWord {
     value:u16,
 }
@@ -74,8 +210,8 @@ impl ops::Add<TypeGoto> for TypeGoto {
     }
 }
 
-#[derive(IntoStaticStr)]
-pub enum LogicOperation {
+#[derive(IntoStaticStr,Debug)]
+pub enum ConditionOperation {
     EqualN((TypeVar,TypeNum)),
     EqualV((TypeVar,TypeVar)),
     LessN((TypeVar,TypeNum)),
@@ -93,15 +229,15 @@ pub enum LogicOperation {
     RightPosN((TypeObject,TypeNum,TypeNum,TypeNum,TypeNum)),
 }
 
-#[derive(IntoStaticStr)]
+#[derive(IntoStaticStr,Debug)]
 pub enum LogicChange {
     #[strum(serialize = "")]
-    Normal((LogicOperation,)),
-    Not((LogicOperation,)),
+    Normal((ConditionOperation,)),
+    Not((ConditionOperation,)),
     Or((Vec<LogicChange>,)),
 }
 
-#[derive(IntoStaticStr)]
+#[derive(IntoStaticStr,Debug)]
 pub enum ActionOperation {
     Return(()),
     Increment((TypeVar,)),
@@ -289,6 +425,7 @@ impl LogicMessages {
             messages.push(position);
         }
         let decrypt = "Avis Durgan";
+        //let decrypt = "Alex Simkin";
         let decrypt_start_adjust = decrypt_start_adjust + messages.len()*2;
         let message_block_slice = &text_slice[1..];
         for m in messages {
@@ -338,6 +475,10 @@ impl LogicResource {
         let logic_sequence = LogicSequence::new(logic_slice).expect("fsjkdfhksdjf");
 
         Ok(LogicResource {logic_sequence, logic_messages})
+    }
+
+    pub fn get_logic_sequence(&self) -> &LogicSequence {
+        return &self.logic_sequence;
     }
 
     fn disassemble_words(words:&Words,word_num:u16) -> String {
@@ -408,27 +549,27 @@ impl LogicResource {
         return string;
     }
 
-    pub fn logic_args_disassemble(operation:&LogicOperation,words:&Words,items:&Objects) -> String {
+    pub fn logic_args_disassemble(operation:&ConditionOperation,words:&Words,items:&Objects) -> String {
         return match operation {
-            LogicOperation::RightPosN(a) |
-            LogicOperation::PosN(a) |
-            LogicOperation::ObjInBox(a) => format!("{},{},{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3),Self::param_dis_num(&a.4)),
-            LogicOperation::Said(a) => Self::param_dis_said(&a.0, words),
-            LogicOperation::HaveKey(_) => String::from(""),
-            LogicOperation::Controller(a) => Self::param_dis_controller(&a.0),
-            LogicOperation::Has(a) => Self::param_dis_item(&a.0, items),
-            LogicOperation::IsSetV(a) => Self::param_dis_var(&a.0),
-            LogicOperation::IsSet(a) => Self::param_dis_flag(&a.0),
-            LogicOperation::GreaterV(a) |
-            LogicOperation::LessV(a) |
-            LogicOperation::EqualV(a) => return format!("{},{}",Self::param_dis_var(&a.0),Self::param_dis_var(&a.1)),
-            LogicOperation::GreaterN(a) |
-            LogicOperation::LessN(a) |
-            LogicOperation::EqualN(a) => return format!("{},{}",Self::param_dis_var(&a.0),Self::param_dis_num(&a.1)),
+            ConditionOperation::RightPosN(a) |
+            ConditionOperation::PosN(a) |
+            ConditionOperation::ObjInBox(a) => format!("{},{},{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3),Self::param_dis_num(&a.4)),
+            ConditionOperation::Said(a) => Self::param_dis_said(&a.0, words),
+            ConditionOperation::HaveKey(_) => String::from(""),
+            ConditionOperation::Controller(a) => Self::param_dis_controller(&a.0),
+            ConditionOperation::Has(a) => Self::param_dis_item(&a.0, items),
+            ConditionOperation::IsSetV(a) => Self::param_dis_var(&a.0),
+            ConditionOperation::IsSet(a) => Self::param_dis_flag(&a.0),
+            ConditionOperation::GreaterV(a) |
+            ConditionOperation::LessV(a) |
+            ConditionOperation::EqualV(a) => return format!("{},{}",Self::param_dis_var(&a.0),Self::param_dis_var(&a.1)),
+            ConditionOperation::GreaterN(a) |
+            ConditionOperation::LessN(a) |
+            ConditionOperation::EqualN(a) => return format!("{},{}",Self::param_dis_var(&a.0),Self::param_dis_num(&a.1)),
         }
     }
 
-    pub fn logic_operation_disassemble(operation:&LogicOperation,words:&Words,items:&Objects) -> String {
+    pub fn logic_operation_disassemble(operation:&ConditionOperation,words:&Words,items:&Objects) -> String {
         let string = Self::logic_args_disassemble(operation,words,items);
         return String::new() + operation.into() + "(" + &string + ")";
     }
@@ -600,7 +741,7 @@ impl LogicResource {
         let s:&'static str = action.into();
         return match action {
             ActionOperation::If((logic,_)) => format!("{} ( {} )",s, Self::logic_disassemble(logic,false,words,items)),
-            ActionOperation::Goto(a) => format!("{} label_{}",s, self.logic_sequence.labels[&a.0].2),
+            ActionOperation::Goto(a) => format!("{} label_{}",s, self.logic_sequence.labels[&a.0].operation_offset),
             _ => format!("{}({})",s,self.action_args_disassemble(action,words,items)),
         };
     }
@@ -612,20 +753,20 @@ impl LogicResource {
         }
 
         let mut indent = 2;
-        for (i,address) in &self.logic_sequence.operations {
-            if let Some((goto,end_if_cnt,pos)) = self.logic_sequence.labels.get(&address) {
-               for _ in 0..*end_if_cnt {
+        for logic_operation in &self.logic_sequence.operations {
+            if let Some(label) = self.logic_sequence.labels.get(&logic_operation.address) {
+               for _ in 0..label.if_destination_cnt {
                     indent-=2;
                     println!("{:indent$}}}","",indent=indent);
                 }
-                if *goto {
-                    println!("label_{}:",pos);
+                if label.is_goto_destination {
+                    println!("label_{}:",label.operation_offset);
                 } 
             }
 
-            println!("{:indent$}{v}","",v=self.instruction_disassemble(&i,words,items),indent=indent);
+            println!("{:indent$}{v}","",v=self.instruction_disassemble(&logic_operation.action,words,items),indent=indent);
 
-            match i {
+            match logic_operation.action {
                 ActionOperation::If(_) => { println!("{:indent$}{{","",indent=indent);indent+=2; }
                 _ => {}
             }
@@ -853,28 +994,28 @@ impl LogicSequence {
         return Ok((Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?));
     }
     
-    fn parse_condition_with_code(iter:&mut std::slice::Iter<u8>, code:u8) -> Result<LogicOperation, &'static str> {
+    fn parse_condition_with_code(iter:&mut std::slice::Iter<u8>, code:u8) -> Result<ConditionOperation, &'static str> {
         return match code {
-            0x12 => Ok(LogicOperation::RightPosN(Self::parse_object_num_num_num_num(iter)?)),
-            0x10 => Ok(LogicOperation::ObjInBox(Self::parse_object_num_num_num_num(iter)?)),
-            0x0E => Ok(LogicOperation::Said((Self::parse_said(iter)?,))),
-            0x0D => Ok(LogicOperation::HaveKey(())),
-            0x0C => Ok(LogicOperation::Controller((Self::parse_controller(iter)?,))),
-            0x0B => Ok(LogicOperation::PosN(Self::parse_object_num_num_num_num(iter)?)),
-            0x09 => Ok(LogicOperation::Has((Self::parse_item(iter)?,))),
-            0x08 => Ok(LogicOperation::IsSetV((Self::parse_var(iter)?,))),
-            0x07 => Ok(LogicOperation::IsSet((Self::parse_flag(iter)?,))),
-            0x06 => Ok(LogicOperation::GreaterV(Self::parse_var_var(iter)?)),
-            0x05 => Ok(LogicOperation::GreaterN(Self::parse_var_num(iter)?)),
-            0x04 => Ok(LogicOperation::LessV(Self::parse_var_var(iter)?)),
-            0x03 => Ok(LogicOperation::LessN(Self::parse_var_num(iter)?)),
-            0x02 => Ok(LogicOperation::EqualV(Self::parse_var_var(iter)?)),
-            0x01 => Ok(LogicOperation::EqualN(Self::parse_var_num(iter)?)),
-            _ => Err("Unexpected LogicOperation {code:02X}"),
+            0x12 => Ok(ConditionOperation::RightPosN(Self::parse_object_num_num_num_num(iter)?)),
+            0x10 => Ok(ConditionOperation::ObjInBox(Self::parse_object_num_num_num_num(iter)?)),
+            0x0E => Ok(ConditionOperation::Said((Self::parse_said(iter)?,))),
+            0x0D => Ok(ConditionOperation::HaveKey(())),
+            0x0C => Ok(ConditionOperation::Controller((Self::parse_controller(iter)?,))),
+            0x0B => Ok(ConditionOperation::PosN(Self::parse_object_num_num_num_num(iter)?)),
+            0x09 => Ok(ConditionOperation::Has((Self::parse_item(iter)?,))),
+            0x08 => Ok(ConditionOperation::IsSetV((Self::parse_var(iter)?,))),
+            0x07 => Ok(ConditionOperation::IsSet((Self::parse_flag(iter)?,))),
+            0x06 => Ok(ConditionOperation::GreaterV(Self::parse_var_var(iter)?)),
+            0x05 => Ok(ConditionOperation::GreaterN(Self::parse_var_num(iter)?)),
+            0x04 => Ok(ConditionOperation::LessV(Self::parse_var_var(iter)?)),
+            0x03 => Ok(ConditionOperation::LessN(Self::parse_var_num(iter)?)),
+            0x02 => Ok(ConditionOperation::EqualV(Self::parse_var_var(iter)?)),
+            0x01 => Ok(ConditionOperation::EqualN(Self::parse_var_num(iter)?)),
+            _ => Err("Unexpected ConditionOperation {code:02X}"),
         }
     }
 
-    fn parse_condition(iter:&mut std::slice::Iter<u8>) -> Result<LogicOperation, &'static str> {
+    fn parse_condition(iter:&mut std::slice::Iter<u8>) -> Result<ConditionOperation, &'static str> {
         let code = iter.next();
         if code.is_none() {
             return Err("Expected condition code, but reached end of iterator");
@@ -922,7 +1063,7 @@ impl LogicSequence {
 
         let mut iter = logic_slice.iter();
 
-        let mut operations:Vec<(ActionOperation,TypeGoto)> = Vec::new();
+        let mut operations:Vec<LogicOperation> = Vec::new();
         let mut offsets:HashMap<TypeGoto, usize>=HashMap::new();
         let mut offsets_rev:HashMap<usize, TypeGoto>=HashMap::new();
         let initial_size = logic_slice.len();
@@ -934,9 +1075,9 @@ impl LogicSequence {
         while let Some(b) = iter.next()
         {
             let program_position = initial_size - iter.as_slice().len() -1;
-            let byte_position_as_goto:TypeGoto = (program_position as i16).into();
-            offsets.insert(byte_position_as_goto, operations.len());
-            offsets_rev.insert(operations.len(),byte_position_as_goto);
+            let address:TypeGoto = (program_position as i16).into();
+            offsets.insert(address, operations.len());
+            offsets_rev.insert(operations.len(),address);
             let action = match b {
                 0xFF => ActionOperation::If(Self::parse_vlogic_change_goto(&mut iter)?),
                 0xFE => ActionOperation::Goto((Self::parse_goto(&mut iter)?,)),
@@ -1076,40 +1217,40 @@ impl LogicSequence {
                 0x00 => ActionOperation::Return(()),
                 _ => {panic!("Unimplemented action {b:02X}");}
             };
-            operations.push((action,byte_position_as_goto));
+            operations.push(LogicOperation { action,address });
         }
 
-        let mut labels:HashMap<TypeGoto, (bool,u16,usize)>=HashMap::new();
+        let mut labels:HashMap<TypeGoto, Label>=HashMap::new();
         labels.reserve(operations.len());
-        for (index,(op,_)) in operations.iter_mut().enumerate() {
-            let is_goto= match op {
+        for (index,op) in operations.iter_mut().enumerate() {
+            let is_goto= match op.action {
                 ActionOperation::Goto(_) => true,
                 _ => false,
             };
 
             let mut destination:TypeGoto = 0i16.into();
-            match op {
+            match op.action {
                 ActionOperation::Goto((g,)) | ActionOperation::If((_,g)) => {
                     let base_offset=offsets_rev.get(&(index+1)).unwrap();
-                    destination = *base_offset+*g;
+                    destination = *base_offset+g;
                     if labels.contains_key(&destination) {
-                        if labels[&destination].2 != offsets[&destination] {
+                        if labels[&destination].operation_offset != offsets[&destination] {
                             panic!("WUT!");
                         }
                         if is_goto {
-                            labels.get_mut(&destination).unwrap().0=true;
+                            labels.get_mut(&destination).unwrap().is_goto_destination=true;
                         } else {
-                            labels.get_mut(&destination).unwrap().1+=1;
+                            labels.get_mut(&destination).unwrap().if_destination_cnt+=1;
                         }
                     } else {
-                        labels.insert(destination, (is_goto,if !is_goto {1} else {0},offsets[&destination]));
+                        labels.insert(destination, Label { is_goto_destination:is_goto, if_destination_cnt: if !is_goto {1} else {0}, operation_offset:offsets[&destination]});
                     }
                 },
                 _ => {},
             }
-            match op {
-                ActionOperation::Goto(a) => a.0 = destination,
-                ActionOperation::If(a) => a.1 = destination,
+            match &mut op.action {
+                ActionOperation::Goto((a,)) => *a = destination,
+                ActionOperation::If((_,a)) => *a = destination,
                 _ => {},
             };
         }
@@ -1117,5 +1258,159 @@ impl LogicSequence {
         operations.shrink_to_fit();
         labels.shrink_to_fit();
         return Ok(LogicSequence { operations, labels });
+    }
+
+    pub fn get_operations(&self) -> &Vec<LogicOperation> {
+        return &self.operations;
+    }
+
+    pub fn lookup_offset(&self,goto:&TypeGoto) -> Option<usize> {
+        return match self.labels.get(goto) {
+            Some(b) => Some(b.operation_offset),
+            None => None,
+        };
+    }
+
+    fn evaluate_condition_operation(state:&LogicState,op:&ConditionOperation) -> bool {
+        return match op {
+            ConditionOperation::EqualN((var,num)) => state.get_var(var) == state.get_num(num),
+            ConditionOperation::EqualV((var1,var2)) => state.get_var(var1) == state.get_var(var2),
+            ConditionOperation::LessN((var,num)) => state.get_var(var) < state.get_num(num),
+            ConditionOperation::LessV((var1,var2)) => state.get_var(var1) < state.get_var(var2),
+            ConditionOperation::GreaterN((var,num)) => state.get_var(var) > state.get_num(num),
+            ConditionOperation::GreaterV((var1,var2)) => state.get_var(var1) > state.get_var(var2), 
+            ConditionOperation::IsSet((flag,)) => state.get_flag(flag) == true,
+            ConditionOperation::IsSetV(_) => todo!(),
+            ConditionOperation::Has(_) =>  /* TODO */ false,
+            ConditionOperation::PosN(_) => todo!(),
+            ConditionOperation::Controller(_) => /* TODO */ false,
+            ConditionOperation::HaveKey(_) => todo!(),
+            ConditionOperation::Said(_) => /* TODO */ false,
+            ConditionOperation::ObjInBox(_) => todo!(),
+            ConditionOperation::RightPosN(_) => todo!(),
+        }
+    }
+
+    fn evaluate_condition_or(state:&LogicState,cond:&Vec<LogicChange>) -> bool {
+        let mut result = false;
+        for a in cond {
+            result = result | match a {
+                LogicChange::Normal((op,)) => Self::evaluate_condition_operation(state,op),
+                LogicChange::Not((op,)) => !Self::evaluate_condition_operation(state,op),
+                _ => panic!("Should not occur i think {:?}", a),
+            };
+        }
+        return result;
+    }
+
+    fn evaluate_condition(state:&LogicState,cond:&Vec<LogicChange>) -> bool {
+        let mut result = true;
+        for a in cond {
+            result = result & match a {
+                LogicChange::Normal((op,)) => Self::evaluate_condition_operation(state,op),
+                LogicChange::Not((op,)) => !Self::evaluate_condition_operation(state,op),
+                LogicChange::Or((or_block,)) => Self::evaluate_condition_or(state, or_block),
+            };
+            if result==false {  // Early out evaluation
+                break;
+            }
+        }
+        return result;
+    }
+
+    fn new_room(state:&mut LogicState,room:u8) {
+        // Stop.update()
+        //unanimate.all()
+        //destroy all resources
+        //player.control()
+        //unblock()
+        state.set_horizon(36);
+        state.set_var(&TypeVar::from(1),state.get_var(&TypeVar::from(0)));
+        state.set_var(&TypeVar::from(0), room);
+        state.set_var(&TypeVar::from(4),0);
+        state.set_var(&TypeVar::from(5),0);
+        state.set_var(&TypeVar::from(9),0);
+        state.set_var(&TypeVar::from(16),0);    // Should be ego view num
+        //ego coords from var 2
+        state.set_var(&TypeVar::from(2),0);
+        state.set_flag(&TypeFlag::from(2),false);
+        state.set_flag(&TypeFlag::from(5),true);
+        // score<- var 3
+    }
+
+
+    fn interpret_instruction(&self,state:&mut LogicState,pc:&LogicExecutionPosition,action:&ActionOperation) -> Option<LogicExecutionPosition> {
+
+        //println!("{:?}",state);
+        println!("{:?}",action);
+
+        match action {
+            ActionOperation::If((condition,goto_if_false)) => if !Self::evaluate_condition(state,condition) { return Some(pc.jump(self,goto_if_false)); },
+            ActionOperation::Goto((goto,)) => return Some(pc.jump(self, goto)),
+            ActionOperation::Return(()) => return None,
+            ActionOperation::Call((num,)) => return Some(LogicExecutionPosition {logic_file:state.get_num(num) as usize, program_counter: 0}),
+            ActionOperation::CallV((var,)) => return Some(LogicExecutionPosition {logic_file:state.get_var(var) as usize, program_counter: 0}),
+            ActionOperation::AssignN((var,num)) => state.set_var(var,state.get_num(num)),
+            ActionOperation::AssignV((var1,var2)) => state.set_var(var1,state.get_var(var2)),
+            ActionOperation::NewRoom((num,)) => { Self::new_room(state,state.get_num(num)); return None },
+            ActionOperation::Reset((flag,)) => state.set_flag(flag, false),
+            ActionOperation::ResetV((var,)) => { let flag=&TypeFlag::from(state.get_var(var)); state.set_flag(flag, false); },
+            ActionOperation::AnimateObj((obj,)) => state.mut_object(obj).set_active(true),
+            ActionOperation::LoadView((num,)) => {/* NO-OP-RAGI */},
+            ActionOperation::LoadViewV((var,)) => {/* NO-OP-RAGI */},
+            ActionOperation::LoadPic((var,)) => {/* NO-OP-RAGI */},
+            ActionOperation::LoadLogic((num,)) => {/* NO-OP-RAGI */},
+            ActionOperation::LoadSound((num,)) => {/* NO-OP-RAGI */},
+            ActionOperation::SetView((obj,num)) => {let n=state.get_num(num); state.mut_object(obj).set_view(n); },
+            ActionOperation::SetViewV((obj,var)) => {let n=state.get_var(var); state.mut_object(obj).set_view(n); },
+            ActionOperation::ObserveObjs((obj,)) => state.mut_object(obj).set_observing(true),
+            ActionOperation::LIndirectN((var,num)) => {let v = &TypeVar::from(state.get_var(var)); state.set_var(v,state.get_num(num)); },
+            ActionOperation::Increment((var,)) => state.set_var(var,state.get_var(var).saturating_add(1)),
+            ActionOperation::Decrement((var,)) => state.set_var(var,state.get_var(var).saturating_sub(1)),
+            ActionOperation::GetPosN((obj,var1,var2)) => { state.set_var(var1, state.object(obj).get_x()); state.set_var(var2, state.object(obj).get_y()); },
+            ActionOperation::StopCycling((obj,)) => state.mut_object(obj).set_cycling(false),
+            ActionOperation::PreventInput(()) => state.set_input(false),
+            ActionOperation::SetHorizon((num,)) => state.set_horizon(state.get_num(num)),
+            ActionOperation::Position((obj,num1,num2)) => { let x=state.get_num(num1); let y=state.get_num(num2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
+            ActionOperation::SetPriority((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_priority(n); },
+            ActionOperation::SetLoop((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_loop(n); },
+            ActionOperation::SetCel((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_cel(n); },
+            _ => panic!("TODO {:?}",action),
+        }
+
+        return Some(pc.next());
+    }
+    
+    pub fn interpret_instructions(&self,state:&mut LogicState,pc:&LogicExecutionPosition,actions:&Vec<LogicOperation>) -> Option<LogicExecutionPosition> {
+        return self.interpret_instruction(state, pc, &actions[pc.program_counter].action);
+    }
+
+}
+
+#[derive(Copy,Clone)]
+pub struct LogicExecutionPosition {
+    logic_file:usize,
+    program_counter:usize,
+}
+
+impl LogicExecutionPosition {
+    pub fn new(file:usize,pc:usize) -> LogicExecutionPosition {
+        return LogicExecutionPosition { logic_file: file, program_counter: pc };
+    }
+
+    pub fn next(&self) -> LogicExecutionPosition {
+        return LogicExecutionPosition { logic_file: self.logic_file, program_counter: self.program_counter+1 };
+    }
+
+    pub fn jump(&self, sequence:&LogicSequence, goto:&TypeGoto) -> LogicExecutionPosition {
+        return LogicExecutionPosition { logic_file: self.logic_file, program_counter: sequence.lookup_offset(goto).unwrap() }
+    }
+
+    pub fn is_call(&self,logic_file:usize) -> bool {
+        return self.logic_file!=logic_file;
+    }
+
+    pub fn get_logic(&self) -> usize {
+        return self.logic_file;
     }
 }
