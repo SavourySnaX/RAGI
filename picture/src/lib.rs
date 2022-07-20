@@ -3,8 +3,10 @@ use std::{iter::Peekable, collections::VecDeque};
 use dir_resource::ResourceDirectoryEntry;
 use volume::Volume;
 
-pub const WIDTH:u8 = 160;
-pub const HEIGHT:u8 = 168;
+pub const PIC_WIDTH_U8:u8 = 160;
+pub const PIC_HEIGHT_U8:u8 = 168;
+pub const PIC_WIDTH_USIZE:usize = PIC_WIDTH_U8 as usize;
+pub const PIC_HEIGHT_USIZE:usize = PIC_HEIGHT_U8 as usize;
 
 pub struct PictureResource
 {
@@ -18,17 +20,21 @@ impl PictureResource {
         return Ok(PictureResource { picture_data });
     }
 
-    pub fn render(&self) -> Result<(Vec<u8>,Vec<u8>), String> {
-        let width:usize=WIDTH.into();
-        let height:usize=HEIGHT.into();
-        let mut picture = vec![15u8;(width*height) as usize];
-        let mut priority = vec![4u8;(width*height) as usize];
+    pub fn render_to(&self,picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE]) -> Result<(), String> {
+        *picture = [15u8;(PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE) as usize];
+        *priority = [4u8;(PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE) as usize];
+        draw_picture(&self.picture_data,picture,priority)?;
+        return Ok(());
+    }
+    pub fn render(&self) -> Result<([u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE]), String> {
+        let mut picture = [15u8;(PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE) as usize];
+        let mut priority =[4u8;(PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE) as usize];
         draw_picture(&self.picture_data,&mut picture,&mut priority)?;
         return Ok((picture,priority));
     }
 }
 
-fn draw_picture(picture_data:&Vec<u8>, picture:&mut Vec<u8>, priority:&mut Vec<u8>) -> Result<(), String> {
+fn draw_picture(picture_data:&Vec<u8>, picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE], priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE]) -> Result<(), String> {
 
     let mut volume_iter = picture_data.iter().peekable();
 
@@ -62,10 +68,10 @@ fn draw_picture(picture_data:&Vec<u8>, picture:&mut Vec<u8>, priority:&mut Vec<u
     return Ok(());
 }
 
-fn rasterise_plot(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8, x:i16, y:i16) {
+fn rasterise_plot(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8, x:i16, y:i16) {
 
-    let width:i16 = WIDTH.into();
-    let height:i16 = HEIGHT.into();
+    let width:i16 = PIC_WIDTH_U8.into();
+    let height:i16 = PIC_HEIGHT_U8.into();
     if x<0 || x>(width-1) || y<0 || y>(height-1) {
         return;
     }
@@ -80,7 +86,7 @@ fn rasterise_plot(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,prio
 
 }
 
-fn rasterise_plot_pen(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,plot_pen_size:u8,plot_pen_splatter:bool,plot_pen_rectangle:bool,x:i16,y:i16) {
+fn rasterise_plot_pen(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,plot_pen_size:u8,plot_pen_splatter:bool,plot_pen_rectangle:bool,x:i16,y:i16) {
 
     // pen size 0-7
     if plot_pen_size != 0 {
@@ -99,7 +105,7 @@ fn rasterise_plot_pen(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,
 }
 
 
-fn rasterise_line(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8, x0:i16, y0:i16, x1:i16, y1:i16) {
+fn rasterise_line(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8, x0:i16, y0:i16, x1:i16, y1:i16) {
 
     let dx = (x1-x0).abs();
     let sx = if x0<x1 {1i16} else {-1i16};
@@ -136,7 +142,7 @@ fn rasterise_line(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,prio
 
 }
 
-fn rasterise_fill(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8, x:u8, y:u8) {
+fn rasterise_fill(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8, x:u8, y:u8) {
 
     let mut queue:VecDeque<(u8,u8)> = VecDeque::new();
 
@@ -151,7 +157,7 @@ fn rasterise_fill(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,prio
         let (x,y) = queue.pop_front().unwrap();
 
         let vec_coord = y as usize;
-        let vec_coord = vec_coord * (WIDTH as usize);
+        let vec_coord = vec_coord * (PIC_WIDTH_U8 as usize);
         let vec_coord: usize = vec_coord + x as usize;
 
         if colour_on && picture[vec_coord]!=15 {
@@ -169,15 +175,15 @@ fn rasterise_fill(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,prio
             priority[vec_coord]=priority_pen;
         }
 
-        if x<(WIDTH-1)  { queue.push_back((x+1,y)); }
+        if x<(PIC_WIDTH_U8-1)  { queue.push_back((x+1,y)); }
         if x>0          { queue.push_back((x-1,y)); }
-        if y<(HEIGHT-1) { queue.push_back((x,y+1)); }
+        if y<(PIC_HEIGHT_U8-1) { queue.push_back((x,y+1)); }
         if y>0          { queue.push_back((x,y-1)); }
     }
 
 }
 
-fn alternate_line<'a, I>(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,volume_iter:&mut Peekable<I>, startx:bool)
+fn alternate_line<'a, I>(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,volume_iter:&mut Peekable<I>, startx:bool)
 where I: Iterator<Item = &'a u8> {
 
     let mut x0 = volume_iter.next().unwrap();
@@ -211,7 +217,7 @@ where I: Iterator<Item = &'a u8> {
 }
 
 
-fn absolute_line<'a, I>(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,volume_iter:&mut Peekable<I>)
+fn absolute_line<'a, I>(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,volume_iter:&mut Peekable<I>)
 where I: Iterator<Item = &'a u8> {
 
     let mut x0 = volume_iter.next().unwrap();
@@ -241,7 +247,7 @@ fn decode_relative(rel:u8) -> i16 {
     }
 }
 
-fn relative_line<'a, I>(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,volume_iter:&mut Peekable<I>)
+fn relative_line<'a, I>(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,volume_iter:&mut Peekable<I>)
 where I: Iterator<Item = &'a u8> {
 
     let mut x0 = *volume_iter.next().unwrap() as i16;
@@ -265,7 +271,7 @@ where I: Iterator<Item = &'a u8> {
 }
 
 
-fn fill<'a, I>(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,volume_iter:&mut Peekable<I>)
+fn fill<'a, I>(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,volume_iter:&mut Peekable<I>)
 where I: Iterator<Item = &'a u8> {
 
     while let Some(b) = volume_iter.peek() {
@@ -281,7 +287,7 @@ where I: Iterator<Item = &'a u8> {
     }
 }
 
-fn plot_pen<'a, I>(picture:&mut Vec<u8>,priority:&mut Vec<u8>,colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,plot_pen_size:u8,plot_pen_splatter:bool,plot_pen_rectangle:bool,volume_iter:&mut Peekable<I>)
+fn plot_pen<'a, I>(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,plot_pen_size:u8,plot_pen_splatter:bool,plot_pen_rectangle:bool,volume_iter:&mut Peekable<I>)
 where I: Iterator<Item = &'a u8> {
 
     if plot_pen_splatter {

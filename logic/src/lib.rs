@@ -1,7 +1,10 @@
 use std::{collections::HashMap, hash::Hash, ops};
 
-use dir_resource::ResourceDirectoryEntry;
+use dir_resource::{ResourceDirectoryEntry, ResourceDirectory};
+use helpers::Root;
 use objects::Objects;
+use picture::*;
+use view::ViewResource;
 use volume::Volume;
 use words::Words;
 
@@ -81,6 +84,76 @@ impl Sprite {
 
 }
 
+pub struct GameResources
+{
+    pub objects:Objects,
+    pub words:Words,
+    pub views:HashMap<usize,ViewResource>,
+    pub pictures:HashMap<usize,PictureResource>,
+    pub logic:HashMap<usize,LogicResource>,
+}
+
+impl GameResources {
+    pub fn new (base_path:&'static str) -> Result<GameResources,String> {
+        let root = Root::new(base_path);
+    
+        let mut volumes:HashMap<u8,Volume>=HashMap::new();
+
+        let dir = ResourceDirectory::new(root.read_data_or_default("VIEWDIR").into_iter()).unwrap();
+
+        let mut views:HashMap<usize,ViewResource> = HashMap::new();
+        views.reserve(256);
+        for (index,entry) in dir.into_iter().enumerate() {
+            if !entry.empty() {
+                if !volumes.contains_key(&entry.volume) {
+                    let bytes = root.read_data_or_default(format!("VOL.{}", entry.volume).as_str());
+                    volumes.insert(entry.volume, Volume::new(bytes.into_iter())?);
+                }
+                views.insert(index, ViewResource::new(&volumes[&entry.volume],&entry)?);
+            }
+        }
+        views.shrink_to_fit();
+
+        let dir = ResourceDirectory::new(root.read_data_or_default("PICDIR").into_iter()).unwrap();
+
+        let mut pictures:HashMap<usize,PictureResource> = HashMap::new();
+        pictures.reserve(256);
+        for (index,entry) in dir.into_iter().enumerate() {
+            if !entry.empty() {
+                if !volumes.contains_key(&entry.volume) {
+                    let bytes = root.read_data_or_default(format!("VOL.{}", entry.volume).as_str());
+                    volumes.insert(entry.volume, Volume::new(bytes.into_iter())?);
+                }
+                pictures.insert(index, PictureResource::new(&volumes[&entry.volume],&entry)?);
+            }
+        }
+        pictures.shrink_to_fit();
+
+        let dir = ResourceDirectory::new(root.read_data_or_default("LOGDIR").into_iter()).unwrap();
+
+        let mut logic:HashMap<usize,LogicResource> = HashMap::new();
+        logic.reserve(256);
+        for (index,entry) in dir.into_iter().enumerate() {
+            if !entry.empty() {
+                if !volumes.contains_key(&entry.volume) {
+                    let bytes = root.read_data_or_default(format!("VOL.{}", entry.volume).as_str());
+                    volumes.insert(entry.volume, Volume::new(bytes.into_iter())?);
+                }
+                logic.insert(index, LogicResource::new(&volumes[&entry.volume],&entry)?);
+            }
+        }
+        logic.shrink_to_fit();
+
+        return Ok(GameResources {
+            words : Words::new(root.read_data_or_default("WORDS.TOK").into_iter())?,
+            objects: Objects::new(&root.read_data_or_default("OBJECT"))?,
+            views,
+            pictures,
+            logic,
+        });
+    }
+}
+
 #[derive(Debug)]
 pub struct LogicState {
     input:bool,
@@ -88,7 +161,16 @@ pub struct LogicState {
     flag:[bool;256],
     var:[u8;256],
     objects:[Sprite;256],   // overkill, todo add list of active
+    string:[String;256],
+
+    video_buffer:[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
+    priority_buffer:[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
+
+    back_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]
 }
+
+const SCREEN_WIDTH_USIZE:usize = PIC_WIDTH_USIZE;
+const SCREEN_HEIGHT_USIZE:usize = 200;
 
 impl LogicState {
     pub fn new() -> LogicState {
@@ -98,6 +180,10 @@ impl LogicState {
             flag: [false;256],
             var: [0u8;256],
             objects: [Sprite::new();256],
+            string : [();256].map(|_| String::new()),
+            video_buffer:[15;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
+            priority_buffer:[4;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
+            back_buffer:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
         }
     }
     pub fn get_flag(&self,f:&TypeFlag) -> bool {
@@ -135,6 +221,19 @@ impl LogicState {
     pub fn mut_object(&mut self,o:&TypeObject) -> &mut Sprite {
         return &mut self.objects[o.value as usize];
     }
+
+    pub fn picture(&self) -> &[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
+        return &self.video_buffer;
+    }
+    
+    pub fn priority(&self) -> &[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
+        return &self.priority_buffer;
+    }
+
+    pub fn back_buffer(&self) -> &[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
+        return &self.back_buffer;
+    }
+
 }
 
 pub struct LogicResource {
@@ -1339,7 +1438,7 @@ impl LogicSequence {
     }
 
 
-    fn interpret_instruction(&self,state:&mut LogicState,pc:&LogicExecutionPosition,action:&ActionOperation) -> Option<LogicExecutionPosition> {
+    fn interpret_instruction(&self,resources:&GameResources,state:&mut LogicState,pc:&LogicExecutionPosition,action:&ActionOperation) -> Option<LogicExecutionPosition> {
 
         //println!("{:?}",state);
         println!("{:?}",action);
@@ -1375,14 +1474,33 @@ impl LogicSequence {
             ActionOperation::SetPriority((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_priority(n); },
             ActionOperation::SetLoop((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_loop(n); },
             ActionOperation::SetCel((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_cel(n); },
+            ActionOperation::DrawPic((var,)) => { let n = state.get_var(var); resources.pictures[&usize::from(n)].render_to(&mut state.video_buffer,&mut state.priority_buffer).unwrap(); },
+            ActionOperation::ShowPic(()) => {
+                for y in 0usize..PIC_HEIGHT_USIZE {
+                    for x in 0usize..PIC_WIDTH_USIZE {
+                        state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = state.picture()[x+y*PIC_WIDTH_USIZE];
+                    }
+                }
+            },
+            ActionOperation::ClearLines((num1,num2,num3)) => {
+                let start=usize::from(state.get_num(num1) * 8);
+                let end = usize::from(state.get_num(num2) * 8);
+                let col = state.get_num(num3);
+                for y in start..end {
+                    for x in 0usize..PIC_WIDTH_USIZE {
+                        state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
+                    }
+                }
+
+            }
             _ => panic!("TODO {:?}",action),
         }
 
         return Some(pc.next());
     }
     
-    pub fn interpret_instructions(&self,state:&mut LogicState,pc:&LogicExecutionPosition,actions:&Vec<LogicOperation>) -> Option<LogicExecutionPosition> {
-        return self.interpret_instruction(state, pc, &actions[pc.program_counter].action);
+    pub fn interpret_instructions(&self,resources:&GameResources,state:&mut LogicState,pc:&LogicExecutionPosition,actions:&Vec<LogicOperation>) -> Option<LogicExecutionPosition> {
+        return self.interpret_instruction(resources, state, pc, &actions[pc.program_counter].action);
     }
 
 }

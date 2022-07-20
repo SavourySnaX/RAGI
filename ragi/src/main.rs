@@ -1,6 +1,6 @@
 use dir_resource::ResourceDirectory;
-use helpers::{Root, double_width, conv_rgba, dump_png};
-use logic::{LogicResource, ActionOperation, LogicOperation, LogicChange, LogicSequence, ConditionOperation, LogicState, LogicExecutionPosition, TypeFlag};
+use helpers::{Root, double_width, conv_rgba, dump_png, double_pic_width};
+use logic::{LogicResource, ActionOperation, LogicOperation, LogicChange, LogicSequence, ConditionOperation, LogicState, LogicExecutionPosition, TypeFlag, GameResources};
 use objects::Objects;
 use picture::PictureResource;
 use sdl2::pixels::Color;
@@ -38,8 +38,8 @@ fn main() -> Result<(), String> {
     let mut foreground = tex_creator.create_texture(sdl2::pixels::PixelFormatEnum::ARGB8888, sdl2::render::TextureAccess::Streaming, 320, 200).unwrap();
 
 
-    let (pic,_) = interpretter.pictures.iter().next().unwrap().1.render().unwrap();
-    let pic = double_width(&pic);
+    let (pic,_) = interpretter.resources.pictures.iter().next().unwrap().1.render().unwrap();
+    let pic = double_pic_width(&pic);
     let pic = conv_rgba(&pic);
 
     dump_png("../err.png",320,168, &pic);
@@ -81,85 +81,28 @@ fn main() -> Result<(), String> {
 }
 
 struct Interpretter {
-    objects:Objects,
-    words:Words,
-    views:HashMap<usize,ViewResource>,
-    pictures:HashMap<usize,PictureResource>,
-    logic:HashMap<usize,LogicResource>,
+    resources:GameResources,
     state:LogicState,
 }
 
 impl Interpretter {
     pub fn new(base_path:&'static str) -> Result<Interpretter,String> {
-        let root = Root::new(base_path);
-    
-        let mut volumes:HashMap<u8,Volume>=HashMap::new();
-
-        let dir = ResourceDirectory::new(root.read_data_or_default("VIEWDIR").into_iter()).unwrap();
-
-        let mut views:HashMap<usize,ViewResource> = HashMap::new();
-        views.reserve(256);
-        for (index,entry) in dir.into_iter().enumerate() {
-            if !entry.empty() {
-                if !volumes.contains_key(&entry.volume) {
-                    let bytes = root.read_data_or_default(format!("VOL.{}", entry.volume).as_str());
-                    volumes.insert(entry.volume, Volume::new(bytes.into_iter())?);
-                }
-                views.insert(index, ViewResource::new(&volumes[&entry.volume],&entry)?);
-            }
-        }
-        views.shrink_to_fit();
-
-        let dir = ResourceDirectory::new(root.read_data_or_default("PICDIR").into_iter()).unwrap();
-
-        let mut pictures:HashMap<usize,PictureResource> = HashMap::new();
-        pictures.reserve(256);
-        for (index,entry) in dir.into_iter().enumerate() {
-            if !entry.empty() {
-                if !volumes.contains_key(&entry.volume) {
-                    let bytes = root.read_data_or_default(format!("VOL.{}", entry.volume).as_str());
-                    volumes.insert(entry.volume, Volume::new(bytes.into_iter())?);
-                }
-                pictures.insert(index, PictureResource::new(&volumes[&entry.volume],&entry)?);
-            }
-        }
-        pictures.shrink_to_fit();
-
-        let dir = ResourceDirectory::new(root.read_data_or_default("LOGDIR").into_iter()).unwrap();
-
-        let mut logic:HashMap<usize,LogicResource> = HashMap::new();
-        logic.reserve(256);
-        for (index,entry) in dir.into_iter().enumerate() {
-            if !entry.empty() {
-                if !volumes.contains_key(&entry.volume) {
-                    let bytes = root.read_data_or_default(format!("VOL.{}", entry.volume).as_str());
-                    volumes.insert(entry.volume, Volume::new(bytes.into_iter())?);
-                }
-                logic.insert(index, LogicResource::new(&volumes[&entry.volume],&entry)?);
-            }
-        }
-        logic.shrink_to_fit();
-
+        let resources = GameResources::new(base_path)?;
         return Ok(Interpretter {
-
-            words : Words::new(root.read_data_or_default("WORDS.TOK").into_iter())?,
-            objects: Objects::new(&root.read_data_or_default("OBJECT"))?,
-            views,
-            pictures,
-            logic,
+            resources,
             state: LogicState::new(),
         });
     }
 
-    pub fn do_call(state:&mut LogicState, entry:&LogicExecutionPosition, logics:&HashMap<usize,LogicResource>) {
+    pub fn do_call(resources:&GameResources,state:&mut LogicState, entry:&LogicExecutionPosition, logics:&HashMap<usize,LogicResource>) {
         let logic_sequence = logics[&entry.get_logic()].get_logic_sequence();
         let actions = logic_sequence.get_operations();
         let mut exec = *entry;
         loop {
-            match logic_sequence.interpret_instructions(state,&exec,&actions) {
+            match logic_sequence.interpret_instructions(resources,state,&exec,&actions) {
                 Some(newpc) => {
                     if newpc.is_call(entry.get_logic()) {
-                        Self::do_call(state,&newpc,logics);
+                        Self::do_call(resources, state,&newpc,logics);
                         exec=exec.next();
                     } else {
                         exec = newpc;
@@ -170,10 +113,10 @@ impl Interpretter {
         }
     }
 
-    pub fn call(state:&mut LogicState,logic_file:usize, logics:&HashMap<usize,LogicResource>) {
+    pub fn call(resources:&GameResources,state:&mut LogicState,logic_file:usize, logics:&HashMap<usize,LogicResource>) {
 
         let exec = LogicExecutionPosition::new(logic_file,0);
-        Self::do_call(state,&exec,logics);
+        Self::do_call(resources, state,&exec,logics);
     }
 
     pub fn run(&mut self) {
@@ -181,7 +124,7 @@ impl Interpretter {
         let mutable_state = &mut self.state;
 
         loop {
-            Self::call(mutable_state, 0, &self.logic);
+            Self::call(&self.resources,mutable_state, 0, &self.resources.logic);
             if !mutable_state.get_flag(&TypeFlag::from(5)) {
                 mutable_state.set_flag(&TypeFlag::from(5), false);
                 break;

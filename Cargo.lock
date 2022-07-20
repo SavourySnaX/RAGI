@@ -89,10 +89,13 @@ version = "0.1.0"
 dependencies = [
  "dir_resource",
  "duplicate",
+ "helpers",
  "objects",
+ "picture",
  "strum",
  "strum_macros",
  "tuple-arity",
+ "view",
  "volume",
  "words",
 ]

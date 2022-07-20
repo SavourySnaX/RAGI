@@ -21,15 +21,22 @@ impl<'a> Root<'_> {
 fn main() {
 
     //let root = Root::new("../images/Leisure Suit Larry in the Land of the Lounge Lizards (1987)(Sierra On-Line, Inc.) [Adventure]/");
-    let root = Root::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/");
+    //let root = Root::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/");
+    let root = Root::new("../images/GROZA/");
 
     let bytes = fs::read(root.base_path.join("OBJECT").into_os_string()).unwrap_or_default();
 
-    let items = Objects::new(&bytes).unwrap();
+    let items = match Objects::new(&bytes) {
+        Ok(a) => a,
+        Err(_) => Objects::blank(),
+    };
     
     let bytes = fs::read(root.base_path.join("WORDS.TOK").into_os_string()).unwrap_or_default();
 
-    let words = Words::new(bytes.into_iter()).unwrap();
+    let words = match Words::new(bytes.into_iter()) {
+        Ok(a) => a,
+        Err(_) => Words::blank(),
+    };
 
     let bytes = fs::read(root.base_path.join("LOGDIR").into_os_string()).unwrap_or_default();
 

@@ -10,6 +10,9 @@ dir_resource = {path = "../dir_resource"}
 volume = {path = "../volume"}
 objects = {path = "../objects"}
 words = {path = "../words"}
+picture = {path = "../picture"}
+view = {path = "../view"}
+helpers = {path = "../helpers"}
 duplicate = "0.4.0"
 tuple-arity = "0.1.2"
 strum = "0.24.1"

@@ -36,16 +36,16 @@ fn dump_picture_resource(root:&Root,entry:&ResourceDirectoryEntry, index:usize) 
     };
     let (picture,priority) = picture_resource.render().unwrap();
     
-    let doubled_width = double_width(&picture);
+    let doubled_width = double_pic_width(&picture);
 
     let rgba = conv_rgba(&doubled_width);
 
-    let width:u32 = WIDTH.into();
-    let height:u32 = HEIGHT.into();
+    let width:u32 = PIC_WIDTH_U8.into();
+    let height:u32 = PIC_HEIGHT_U8.into();
 
     dump_png(format!("../{}-picture.png",index).as_str(),width*2,height,&rgba);
 
-    let doubled_width = double_width(&priority);
+    let doubled_width = double_pic_width(&priority);
 
     let rgba = conv_greyscale(&doubled_width);
 

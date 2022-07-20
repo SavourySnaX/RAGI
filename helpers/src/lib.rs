@@ -41,6 +41,16 @@ mod tests {
 }
 
 
+pub fn double_pic_width(data:&[u8]) -> Vec<u8> {
+    let mut out_vec = Vec::new();
+    out_vec.reserve(data.len()*2);
+    for a in data {
+        out_vec.push(*a);
+        out_vec.push(*a);
+    }
+    return out_vec;
+}
+
 pub fn double_width(data:&Vec<u8>) -> Vec<u8> {
     let mut out_vec = Vec::new();
     out_vec.reserve(data.len()*2);
