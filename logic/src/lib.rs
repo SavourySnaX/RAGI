@@ -1,6 +1,7 @@
-use std::{collections::HashMap, hash::Hash, ops};
+use std::{collections::HashMap, hash::Hash, ops, fmt, fs};
 
 use dir_resource::{ResourceDirectoryEntry, ResourceDirectory};
+use fixed::{FixedU16, types::extra::U8, FixedI32};
 use helpers::Root;
 use objects::Objects;
 use picture::*;
@@ -10,44 +11,89 @@ use words::Words;
 
 use strum_macros::IntoStaticStr;
 
+
+type FP16=FixedU16<U8>;
+type FP32=FixedI32<U8>;
+
 #[derive(Debug,Copy,Clone)] // TODO revisit copy
 pub struct Sprite {
     active:bool,
+    visible:bool,   // draw to screen (draw/erase, to confirm if this is automated (sprite), or blit)
     observing:bool, // treats other objects as obsticles
     cycle:bool,     // cycle loop automatically
+    one_shot:bool,  // runs until end of current loop, and triggers flag
+    move_obj:bool,  // indicates the object has been told to move to a dest point
     view:u8,
     cloop:u8,
     cel:u8,
-    x:u8,           // bottom left corner
-    y:u8,
+    x:FP16,           // bottom left corner
+    y:FP16,
     priority:u8,
+    one_shot_flag:TypeFlag,
+    move_flag:TypeFlag,
+    ex:FP16,
+    ey:FP16,
+    step_size:FP16,
 }
 
 impl Sprite {
     pub fn new() -> Sprite {
         return Sprite { 
             active: false, 
+            visible: false,
             observing: false, 
             cycle: false, 
+            one_shot: false,
+            move_obj: false,
             view: 0, 
             cloop: 0,
             cel: 0,
-            x:0, 
-            y:0,
+            x:FP16::from_num(0), 
+            y:FP16::from_num(0),
             priority:0,
+            one_shot_flag:TypeFlag::from(0),
+            move_flag: TypeFlag::from(0),
+            ex: FP16::from_num(0),
+            ey: FP16::from_num(0),
+            step_size: FP16::from_num(0),
         };
     }
 
     pub fn get_x(&self) -> u8 {
-        return self.x;
+        return self.x.to_num();
     }
     
     pub fn get_y(&self) -> u8 {
+        return self.y.to_num();
+    }
+
+    pub fn get_x_fp16(&self) -> FP16 {
+        return self.x;
+    }
+    
+    pub fn get_y_fp16(&self) -> FP16 {
         return self.y;
     }
 
+    pub fn get_step_size(&self) -> FP16 {
+        return self.step_size;
+    }
+
+    pub fn get_end_x(&self) -> FP16 {
+        return self.ex;
+    }
+    
+    pub fn get_end_y(&self) -> FP16 {
+        return self.ey;
+    }
+
+
     pub fn set_active(&mut self,b:bool) {
         self.active=b;
+    }
+    
+    pub fn set_visible(&mut self,b:bool) {
+        self.visible=b;
     }
 
     pub fn set_view(&mut self, view:u8) {
@@ -63,13 +109,21 @@ impl Sprite {
     }
 
     pub fn set_x(&mut self,n:u8) {
-        self.x = n;
+        self.x = FP16::from_num(n);
     }
     
     pub fn set_y(&mut self,n:u8) {
-        self.y = n;
+        self.y = FP16::from_num(n);
+    }
+ 
+    pub fn set_x_fp16(&mut self,n:FP16) {
+        self.x = n;
     }
     
+    pub fn set_y_fp16(&mut self,n:FP16) {
+        self.y = n;
+    }
+
     pub fn set_priority(&mut self,n:u8) {
         self.priority = n;
     }
@@ -82,6 +136,37 @@ impl Sprite {
         self.cel = n;
     }
 
+    pub fn set_one_shot(&mut self,f:&TypeFlag) {
+        self.one_shot=true;
+        self.one_shot_flag = *f;
+    }
+
+    pub fn clear_one_shot(&mut self) {
+        self.one_shot=false;
+    }
+
+    pub fn set_move(&mut self,x:u8,y:u8,s:u8,f:&TypeFlag) {
+        self.move_obj=true;
+        self.ex=FP16::from_num(x);
+        self.ey=FP16::from_num(y);
+        self.step_size=FP16::from_bits((s as u16)<<6);
+        self.move_flag=*f;
+    }
+
+    pub fn clear_move(&mut self) {
+        self.move_obj=false;
+    }
+
+    pub fn adjust_x_via_delta(&mut self,dx:u8) {
+        let t = FP16::from_num(dx);
+        self.x = self.x.wrapping_add(t);
+    }
+
+    pub fn adjust_y_via_delta(&mut self,dy:u8) {
+        let t = FP16::from_num(dy);
+        self.y = self.y.wrapping_add(t);
+    }
+
 }
 
 pub struct GameResources
@@ -91,10 +176,15 @@ pub struct GameResources
     pub views:HashMap<usize,ViewResource>,
     pub pictures:HashMap<usize,PictureResource>,
     pub logic:HashMap<usize,LogicResource>,
+    pub font:Vec<u8>,
 }
 
 impl GameResources {
     pub fn new (base_path:&'static str) -> Result<GameResources,String> {
+
+        // hack for font
+        let font = fs::read("../images/BM.PSF").unwrap();
+
         let root = Root::new(base_path);
     
         let mut volumes:HashMap<u8,Volume>=HashMap::new();
@@ -150,12 +240,13 @@ impl GameResources {
             views,
             pictures,
             logic,
+            font,
         });
     }
 }
 
-#[derive(Debug)]
 pub struct LogicState {
+    new_room:u8,
     input:bool,
     horizon:u8,
     flag:[bool;256],
@@ -166,7 +257,8 @@ pub struct LogicState {
     video_buffer:[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
     priority_buffer:[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
 
-    back_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]
+    back_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+    post_sprites:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
 }
 
 const SCREEN_WIDTH_USIZE:usize = PIC_WIDTH_USIZE;
@@ -175,6 +267,7 @@ const SCREEN_HEIGHT_USIZE:usize = 200;
 impl LogicState {
     pub fn new() -> LogicState {
         return LogicState {
+            new_room: 0,
             input: false,
             horizon: 0,
             flag: [false;256],
@@ -184,6 +277,7 @@ impl LogicState {
             video_buffer:[15;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
             priority_buffer:[4;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
             back_buffer:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+            post_sprites:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
         }
     }
     pub fn get_flag(&self,f:&TypeFlag) -> bool {
@@ -197,6 +291,14 @@ impl LogicState {
     pub fn get_num(&self,v:&TypeNum) -> u8 {
         return v.value;
     }
+    
+    pub fn get_new_room(&self) -> u8 {
+        return self.new_room;
+    }
+
+    pub fn get_message(&self,m:&TypeMessage) -> u8 {
+        return m.value;
+    }
 
     pub fn set_var(&mut self,v:&TypeVar,n:u8) {
         self.var[v.value as usize] = n;
@@ -204,6 +306,10 @@ impl LogicState {
 
     pub fn set_flag(&mut self,f:&TypeFlag,n:bool) {
         self.flag[f.value as usize] = n;
+    }
+
+    pub fn set_string(&mut self,s:&TypeString,m:&String) {
+        self.string[s.value as usize] = m.clone();
     }
     
     pub fn set_input(&mut self,b:bool) {
@@ -214,12 +320,24 @@ impl LogicState {
         self.horizon = h;
     }
 
+    pub fn reset_new_room(&mut self) {
+        self.new_room = 0;
+    }
+
+    pub fn set_new_room(&mut self,r:u8) {
+        self.new_room = r;
+    }
+
     pub fn object(&self,o:&TypeObject) -> &Sprite {
         return &self.objects[o.value as usize];
     }
 
     pub fn mut_object(&mut self,o:&TypeObject) -> &mut Sprite {
         return &mut self.objects[o.value as usize];
+    }
+
+    pub fn active_objects(&self) -> impl Iterator<Item = (usize,Sprite)> {
+        return self.objects.into_iter().take_while(|x| x.active).enumerate();
     }
 
     pub fn picture(&self) -> &[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
@@ -234,6 +352,24 @@ impl LogicState {
         return &self.back_buffer;
     }
 
+    pub fn final_buffer(&self) -> &[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
+        return &&self.post_sprites;
+    }
+
+}
+
+impl fmt::Debug for LogicState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LogicState")
+         .field("new_room", &self.new_room)
+         .field("input", &self.input)
+         .field("horizon", &self.horizon)
+         .field("flag", &self.flag)
+         .field("var", &self.var)
+         .field("objects", &self.objects)
+         .field("string", &self.string)
+         .finish()
+    }
 }
 
 pub struct LogicResource {
@@ -1383,7 +1519,7 @@ impl LogicSequence {
             ConditionOperation::Has(_) =>  /* TODO */ false,
             ConditionOperation::PosN(_) => todo!(),
             ConditionOperation::Controller(_) => /* TODO */ false,
-            ConditionOperation::HaveKey(_) => todo!(),
+            ConditionOperation::HaveKey(_) => /* TODO */ false,
             ConditionOperation::Said(_) => /* TODO */ false,
             ConditionOperation::ObjInBox(_) => todo!(),
             ConditionOperation::RightPosN(_) => todo!(),
@@ -1417,7 +1553,7 @@ impl LogicSequence {
         return result;
     }
 
-    fn new_room(state:&mut LogicState,room:u8) {
+    pub fn new_room(state:&mut LogicState,room:u8) {
         // Stop.update()
         //unanimate.all()
         //destroy all resources
@@ -1444,6 +1580,17 @@ impl LogicSequence {
         println!("{:?}",action);
 
         match action {
+            // Not complete
+            ActionOperation::Sound((num,flag)) => /* TODO RAGI  - for now, just pretend sound finished*/ state.set_flag(flag,true),
+
+            // Not needed
+            ActionOperation::LoadView((_num,)) => {/* NO-OP-RAGI */},
+            ActionOperation::LoadViewV((_var,)) => {/* NO-OP-RAGI */},
+            ActionOperation::LoadPic((_var,)) => {/* NO-OP-RAGI */},
+            ActionOperation::LoadLogic((_num,)) => {/* NO-OP-RAGI */},
+            ActionOperation::LoadSound((_num,)) => {/* NO-OP-RAGI */},
+
+            // Everything else
             ActionOperation::If((condition,goto_if_false)) => if !Self::evaluate_condition(state,condition) { return Some(pc.jump(self,goto_if_false)); },
             ActionOperation::Goto((goto,)) => return Some(pc.jump(self, goto)),
             ActionOperation::Return(()) => return None,
@@ -1451,15 +1598,10 @@ impl LogicSequence {
             ActionOperation::CallV((var,)) => return Some(LogicExecutionPosition {logic_file:state.get_var(var) as usize, program_counter: 0}),
             ActionOperation::AssignN((var,num)) => state.set_var(var,state.get_num(num)),
             ActionOperation::AssignV((var1,var2)) => state.set_var(var1,state.get_var(var2)),
-            ActionOperation::NewRoom((num,)) => { Self::new_room(state,state.get_num(num)); return None },
+            ActionOperation::NewRoom((num,)) => { state.set_new_room(state.get_num(num)); return None },
             ActionOperation::Reset((flag,)) => state.set_flag(flag, false),
             ActionOperation::ResetV((var,)) => { let flag=&TypeFlag::from(state.get_var(var)); state.set_flag(flag, false); },
             ActionOperation::AnimateObj((obj,)) => state.mut_object(obj).set_active(true),
-            ActionOperation::LoadView((num,)) => {/* NO-OP-RAGI */},
-            ActionOperation::LoadViewV((var,)) => {/* NO-OP-RAGI */},
-            ActionOperation::LoadPic((var,)) => {/* NO-OP-RAGI */},
-            ActionOperation::LoadLogic((num,)) => {/* NO-OP-RAGI */},
-            ActionOperation::LoadSound((num,)) => {/* NO-OP-RAGI */},
             ActionOperation::SetView((obj,num)) => {let n=state.get_num(num); state.mut_object(obj).set_view(n); },
             ActionOperation::SetViewV((obj,var)) => {let n=state.get_var(var); state.mut_object(obj).set_view(n); },
             ActionOperation::ObserveObjs((obj,)) => state.mut_object(obj).set_observing(true),
@@ -1471,6 +1613,7 @@ impl LogicSequence {
             ActionOperation::PreventInput(()) => state.set_input(false),
             ActionOperation::SetHorizon((num,)) => state.set_horizon(state.get_num(num)),
             ActionOperation::Position((obj,num1,num2)) => { let x=state.get_num(num1); let y=state.get_num(num2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
+            ActionOperation::Reposition((obj,var1,var2)) => {let dx=state.get_var(var1); let dy=state.get_var(var2); state.mut_object(obj).adjust_x_via_delta(dx); state.mut_object(obj).adjust_y_via_delta(dy); },
             ActionOperation::SetPriority((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_priority(n); },
             ActionOperation::SetLoop((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_loop(n); },
             ActionOperation::SetCel((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_cel(n); },
@@ -1491,14 +1634,45 @@ impl LogicSequence {
                         state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
                     }
                 }
-
-            }
+            },
+            ActionOperation::SetString((s,m)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; state.set_string(s,m); },
+            ActionOperation::Draw((obj,)) => state.mut_object(obj).set_visible(true),
+            ActionOperation::EndOfLoop((obj,flag)) => state.mut_object(obj).set_one_shot(flag),
+            ActionOperation::MoveObj((obj,num1,num2,num3,flag)) => { let x=state.get_num(num1); let y=state.get_num(num2); let s=state.get_num(num3); state.mut_object(obj).set_move(x, y, s, flag); },
+            ActionOperation::Erase((obj,)) => state.mut_object(obj).set_visible(false),
+            ActionOperation::Display((num1,num2,m)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; let x=state.get_num(num2); let y=state.get_num(num1); Self::display_text(resources,state,x,y,m); },
             _ => panic!("TODO {:?}",action),
         }
 
         return Some(pc.next());
     }
-    
+ 
+    pub fn render_glyph(resources:&GameResources,state:&mut LogicState,x:u8,y:u8,g:u8) {
+        let s = resources.font.as_slice();
+        let x = x as usize;
+        let y = y as usize;
+        for yy in 0..8 {
+            let index = (g as usize)*8 + 4 + yy;
+            let mut bits = s[index];
+            for xx in 0..4 {
+                if (bits & 0x80) == 0x80 {
+                    state.back_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = 15;
+                }
+                bits=bits<<2;
+            }
+        }
+    }
+
+    // FIX ME - need to make back_buffer 320 wide, and deal with fallout of that
+    pub fn display_text(resources:&GameResources,state:&mut LogicState,x:u8,y:u8,s:&String) {
+        let mut x = x*4;
+        let y=y*8;
+        for l in s.as_bytes() {
+            Self::render_glyph(resources, state, x, y, *l);
+            x+=4;
+        }
+    }
+
     pub fn interpret_instructions(&self,resources:&GameResources,state:&mut LogicState,pc:&LogicExecutionPosition,actions:&Vec<LogicOperation>) -> Option<LogicExecutionPosition> {
         return self.interpret_instruction(resources, state, pc, &actions[pc.program_counter].action);
     }
@@ -1531,4 +1705,90 @@ impl LogicExecutionPosition {
     pub fn get_logic(&self) -> usize {
         return self.logic_file;
     }
+}
+
+//sprite stuff
+pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
+    // Handle direction updates/move logic?
+
+    for (num,obj) in state.active_objects() {
+        let obj_num = &TypeObject::from(num as u8);
+        if obj.move_obj {
+            // todo set direction var
+            let x=FP32::from(obj.get_x_fp16());
+            let y=FP32::from(obj.get_y_fp16());
+            let s=FP32::from(obj.get_step_size());
+            let ex=FP32::from(obj.get_end_x());
+            let ey=FP32::from(obj.get_end_y());
+            let dx = (ex-x).signum();
+            let dy = (ey-y).signum();
+            let x=x.wrapping_add(dx*s);
+            let y=y.wrapping_add(dy*s);
+            let bx:i32 = x.to_bits();
+            let by:i32 = y.to_bits();
+            state.mut_object(obj_num).set_x_fp16(FP16::from_bits((bx&0xFFFF)as u16));
+            state.mut_object(obj_num).set_y_fp16(FP16::from_bits((by&0xFFFF)as u16));
+
+            if x.int()==ex.int() && y.int()==ey.int() {
+                state.set_flag(&obj.move_flag, true);
+                state.mut_object(obj_num).clear_move();
+            }
+        }
+
+    }
+}
+
+pub fn render_sprites(resources:&GameResources,state:&mut LogicState) {
+    state.post_sprites = state.back_buffer;
+
+    for (num,obj) in state.active_objects() {
+        let v = usize::from(obj.view);
+        let l = usize::from(obj.cloop);
+        let c = usize::from(obj.cel);
+        let view = &resources.views[&v];
+        let loops = view.get_loops();
+        let cloop = &loops[l];
+        let cels = cloop.get_cels();
+        let cell = &cels[c];
+
+        if obj.visible {
+
+            let x = usize::from(obj.get_x());
+            let y = usize::from(obj.get_y());
+            let h = usize::from(cell.get_height());
+            let w = usize::from(cell.get_width());
+            let t = cell.get_transparent_colour();
+            let d = cell.get_data();
+
+            for yy in 0..h {
+                for xx in 0..w {
+                    let col = d[xx+yy*w];
+                    if col != t {
+                        let sx = xx+x;
+                        let sy=yy+y-h;
+                        let pri = state.priority()[sx+sy*PIC_WIDTH_USIZE];
+                        if pri <= obj.priority {
+                            state.post_sprites[sx+sy*SCREEN_WIDTH_USIZE]=col;
+                        }
+                    }
+                }
+            }
+        }
+
+        let obj_num = TypeObject::from(num as u8);
+
+        if obj.one_shot || obj.cycle {
+            if cels.len()-1 > c {
+                state.mut_object(&obj_num).set_cel(obj.cel.wrapping_add(1));
+            } else {
+                if obj.cycle {
+                    state.mut_object(&obj_num).set_cel(0);
+                } else {
+                    state.set_flag(&obj.one_shot_flag,true);
+                    state.mut_object(&obj_num).clear_one_shot();
+                }
+            }
+        }
+    }
+
 }

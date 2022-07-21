@@ -1,17 +1,14 @@
-use dir_resource::ResourceDirectory;
-use helpers::{Root, double_width, conv_rgba, dump_png, double_pic_width};
-use logic::{LogicResource, ActionOperation, LogicOperation, LogicChange, LogicSequence, ConditionOperation, LogicState, LogicExecutionPosition, TypeFlag, GameResources};
-use objects::Objects;
-use picture::PictureResource;
+
+use helpers::{conv_rgba, double_pic_width};
+use logic::{LogicResource, LogicSequence, LogicState, LogicExecutionPosition, TypeFlag, GameResources, TypeVar, render_sprites, update_sprites};
+
+
 use sdl2::pixels::Color;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
-use view::ViewResource;
-use volume::Volume;
-use words::Words;
+
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::time::Duration;
 
 fn main() -> Result<(), String> {
@@ -21,7 +18,7 @@ fn main() -> Result<(), String> {
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
 
-    let window = video_subsystem.window("rust-sdl2 demo", 640, 400)
+    let window = video_subsystem.window("R.A.G.I", 640, 400)
         .position_centered()
         .build()
         .expect("could not initialize video subsystem");
@@ -35,27 +32,8 @@ fn main() -> Result<(), String> {
     let mut event_pump = sdl_context.event_pump()?;
 
     let tex_creator = canvas.texture_creator();
-    let mut foreground = tex_creator.create_texture(sdl2::pixels::PixelFormatEnum::ARGB8888, sdl2::render::TextureAccess::Streaming, 320, 200).unwrap();
+    let mut foreground = tex_creator.create_texture(sdl2::pixels::PixelFormatEnum::ABGR8888, sdl2::render::TextureAccess::Streaming, 320, 200).unwrap();
 
-
-    let (pic,_) = interpretter.resources.pictures.iter().next().unwrap().1.render().unwrap();
-    let pic = double_pic_width(&pic);
-    let pic = conv_rgba(&pic);
-
-    dump_png("../err.png",320,168, &pic);
-
-    let mut vec:Vec<u8> = vec![0u8;320*200*4];//Vec::new();
-    for y in 0usize..168 {
-        for x in 0usize..320 {
-            for n in 0..4 {
-                vec[(x+y*320)*4+n]=pic[(x+y*320)*4+n];
-            }
-        }
-    }
-
-    dump_png("../huh.png",320,200, &vec);
-
-    foreground.update(None, &vec[..], 320*4).unwrap();
     'running: loop {
         canvas.set_draw_color(Color::RGB(0, 0, 0));
         canvas.clear();
@@ -71,7 +49,22 @@ fn main() -> Result<(), String> {
         // The rest of the game loop goes here...
         interpretter.run();
 
-        canvas.copy(&foreground, None, Rect::new(0,0,320,200)).unwrap();
+        // Update our texture from our back buffer
+        let pic = double_pic_width(interpretter.state.final_buffer());
+        let pic = conv_rgba(&pic);
+
+        let mut vec:Vec<u8> = vec![0u8;320*200*4];//Vec::new();
+        for y in 0usize..200 {
+            for x in 0usize..320 {
+                for n in 0..4 {
+                    vec[(x+y*320)*4+n]=pic[(x+y*320)*4+n];
+                }
+            }
+        }
+
+        foreground.update(None, &vec[..], 320*4).unwrap();
+
+        canvas.copy(&foreground, None, Rect::new(0,0,640,400)).unwrap();
 
         canvas.present();
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
@@ -123,12 +116,40 @@ impl Interpretter {
 
         let mutable_state = &mut self.state;
 
+        // delay
+        // clear keybuffer
+
+        mutable_state.set_flag(&TypeFlag::from(2), false);
+        mutable_state.set_flag(&TypeFlag::from(4), false);
+        // poll keyb/joystick
+        // if program.control (EGO dir = var(6))
+        // if player.control (var(6) = EGO dir)
+        // For all objects wich animate.obj,start_update and draw
+        //  recaclc dir of movement
+        update_sprites(&self.resources,mutable_state);
+
+        // If score has changed(var(3)) or sound has turned off/on (flag(9)), update status line
+        
         loop {
+            // Execute Logic 0
+            mutable_state.reset_new_room();
             Self::call(&self.resources,mutable_state, 0, &self.resources.logic);
-            if !mutable_state.get_flag(&TypeFlag::from(5)) {
-                mutable_state.set_flag(&TypeFlag::from(5), false);
+            // dir of EGO <- var(6)
+            mutable_state.set_var(&TypeVar::from(5), 0);
+            mutable_state.set_var(&TypeVar::from(4), 0);
+            mutable_state.set_flag(&TypeFlag::from(5), false);
+            mutable_state.set_flag(&TypeFlag::from(6), false);
+            mutable_state.set_flag(&TypeFlag::from(12), false);
+            // update all controlled objects on screen
+            // if new room issued, rerun logic
+            if mutable_state.get_new_room()!=0 {
+                LogicSequence::new_room(mutable_state,mutable_state.get_new_room());
+            } else {
                 break;
             }
         }
+
+        render_sprites(&self.resources,mutable_state);
+
     }
 }
