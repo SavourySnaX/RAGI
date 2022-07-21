@@ -5,6 +5,7 @@ use fixed::{FixedU16, types::extra::U8, FixedI32};
 use helpers::Root;
 use objects::Objects;
 use picture::*;
+use rand::{Rng, prelude::ThreadRng};
 use view::ViewResource;
 use volume::Volume;
 use words::Words;
@@ -22,6 +23,7 @@ pub struct Sprite {
     observing:bool, // treats other objects as obsticles
     cycle:bool,     // cycle loop automatically
     one_shot:bool,  // runs until end of current loop, and triggers flag
+    reverse:bool,   // reverses the order of animation 
     move_obj:bool,  // indicates the object has been told to move to a dest point
     view:u8,
     cloop:u8,
@@ -44,6 +46,7 @@ impl Sprite {
             observing: false, 
             cycle: false, 
             one_shot: false,
+            reverse: false,
             move_obj: false,
             view: 0, 
             cloop: 0,
@@ -98,6 +101,8 @@ impl Sprite {
 
     pub fn set_view(&mut self, view:u8) {
         self.view = view;
+        self.cloop=0;
+        self.cel=0;
     }
 
     pub fn set_observing(&mut self,b:bool) {
@@ -130,6 +135,7 @@ impl Sprite {
    
     pub fn set_loop(&mut self,n:u8) {
         self.cloop = n;
+        self.cel=0;
     }
     
     pub fn set_cel(&mut self,n:u8) {
@@ -138,6 +144,12 @@ impl Sprite {
 
     pub fn set_one_shot(&mut self,f:&TypeFlag) {
         self.one_shot=true;
+        self.one_shot_flag = *f;
+    }
+
+    pub fn set_one_shot_reverse(&mut self,f:&TypeFlag) {
+        self.one_shot=true;
+        self.reverse=true;
         self.one_shot_flag = *f;
     }
 
@@ -167,6 +179,9 @@ impl Sprite {
         self.y = self.y.wrapping_add(t);
     }
 
+    pub fn reset(&mut self) {
+        *self=Sprite::new();
+    }
 }
 
 pub struct GameResources
@@ -246,6 +261,7 @@ impl GameResources {
 }
 
 pub struct LogicState {
+    rng:ThreadRng,
     new_room:u8,
     input:bool,
     horizon:u8,
@@ -267,6 +283,7 @@ const SCREEN_HEIGHT_USIZE:usize = 200;
 impl LogicState {
     pub fn new() -> LogicState {
         return LogicState {
+            rng:rand::thread_rng(),
             new_room: 0,
             input: false,
             horizon: 0,
@@ -280,6 +297,7 @@ impl LogicState {
             post_sprites:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
         }
     }
+
     pub fn get_flag(&self,f:&TypeFlag) -> bool {
         return self.flag[f.value as usize];
     }
@@ -298,6 +316,10 @@ impl LogicState {
 
     pub fn get_message(&self,m:&TypeMessage) -> u8 {
         return m.value;
+    }
+
+    pub fn get_random(&mut self,start:&TypeNum,end:&TypeNum) -> u8 {
+        return self.rng.gen_range(self.get_num(start)..self.get_num(end));
     }
 
     pub fn set_var(&mut self,v:&TypeVar,n:u8) {
@@ -1556,6 +1578,10 @@ impl LogicSequence {
     pub fn new_room(state:&mut LogicState,room:u8) {
         // Stop.update()
         //unanimate.all()
+        for (num,obj) in state.active_objects() {
+            state.mut_object(&TypeObject::from(num as u8)).active=false;
+            //state.mut_object(&TypeObject::from(num as u8)).reset();  (may not be needed)
+        }
         //destroy all resources
         //player.control()
         //unblock()
@@ -1577,7 +1603,7 @@ impl LogicSequence {
     fn interpret_instruction(&self,resources:&GameResources,state:&mut LogicState,pc:&LogicExecutionPosition,action:&ActionOperation) -> Option<LogicExecutionPosition> {
 
         //println!("{:?}",state);
-        println!("{:?}",action);
+        //println!("{:?}",action);
 
         match action {
             // Not complete
@@ -1629,7 +1655,7 @@ impl LogicSequence {
                 let start=usize::from(state.get_num(num1) * 8);
                 let end = usize::from(state.get_num(num2) * 8);
                 let col = state.get_num(num3);
-                for y in start..end {
+                for y in start..=end {
                     for x in 0usize..PIC_WIDTH_USIZE {
                         state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
                     }
@@ -1641,6 +1667,10 @@ impl LogicSequence {
             ActionOperation::MoveObj((obj,num1,num2,num3,flag)) => { let x=state.get_num(num1); let y=state.get_num(num2); let s=state.get_num(num3); state.mut_object(obj).set_move(x, y, s, flag); },
             ActionOperation::Erase((obj,)) => state.mut_object(obj).set_visible(false),
             ActionOperation::Display((num1,num2,m)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; let x=state.get_num(num2); let y=state.get_num(num1); Self::display_text(resources,state,x,y,m); },
+            ActionOperation::ReverseLoop((obj,flag)) => state.mut_object(obj).set_one_shot_reverse(flag),
+            ActionOperation::Random((num1,num2,var)) => { let r = state.get_random(num1,num2); state.set_var(var,r); },
+            ActionOperation::Set((flag,)) => state.set_flag(flag, true),
+            ActionOperation::SetV((var,)) => { let flag=&TypeFlag::from(state.get_var(var)); state.set_flag(flag, true); },
             _ => panic!("TODO {:?}",action),
         }
 
@@ -1778,16 +1808,30 @@ pub fn render_sprites(resources:&GameResources,state:&mut LogicState) {
         let obj_num = TypeObject::from(num as u8);
 
         if obj.one_shot || obj.cycle {
-            if cels.len()-1 > c {
-                state.mut_object(&obj_num).set_cel(obj.cel.wrapping_add(1));
-            } else {
-                if obj.cycle {
-                    state.mut_object(&obj_num).set_cel(0);
+            if obj.reverse {
+                if c > 0 {
+                    state.mut_object(&obj_num).set_cel(obj.cel.wrapping_sub(1));
                 } else {
-                    state.set_flag(&obj.one_shot_flag,true);
-                    state.mut_object(&obj_num).clear_one_shot();
+                    if obj.cycle {
+                        state.mut_object(&obj_num).set_cel((cels.len()-1) as u8);
+                    } else {
+                        state.set_flag(&obj.one_shot_flag,true);
+                        state.mut_object(&obj_num).clear_one_shot();
+                    }
+                }
+            } else {
+                if cels.len()-1 > c {
+                    state.mut_object(&obj_num).set_cel(obj.cel.wrapping_add(1));
+                } else {
+                    if obj.cycle {
+                        state.mut_object(&obj_num).set_cel(0);
+                    } else {
+                        state.set_flag(&obj.one_shot_flag,true);
+                        state.mut_object(&obj_num).clear_one_shot();
+                    }
                 }
             }
+
         }
     }
 

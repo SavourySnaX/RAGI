@@ -28,14 +28,14 @@ fn main() {
 
     let items = match Objects::new(&bytes) {
         Ok(a) => a,
-        Err(_) => Objects::blank(),
+        Err(_) => panic!("!"),//Objects::blank(),
     };
     
     let bytes = fs::read(root.base_path.join("WORDS.TOK").into_os_string()).unwrap_or_default();
 
     let words = match Words::new(bytes.into_iter()) {
         Ok(a) => a,
-        Err(_) => Words::blank(),
+        Err(_) => panic!("!"),//Words::blank(),
     };
 
     let bytes = fs::read(root.base_path.join("LOGDIR").into_os_string()).unwrap_or_default();
