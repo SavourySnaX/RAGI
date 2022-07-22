@@ -289,18 +289,29 @@ impl GameResources {
 pub struct LogicState {
     rng:ThreadRng,
     new_room:u8,
+    text_mode:bool,
     input:bool,
     horizon:u8,
     flag:[bool;256],
     var:[u8;256],
     objects:[Sprite;256],   // overkill, todo add list of active
     string:[String;256],
+    
+    prompt:char,
 
+    //input
+    key_len:usize,
+    key_buffer:[u8;256],
+
+    // video
     video_buffer:[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
     priority_buffer:[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
 
     back_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
     post_sprites:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+
+    text_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+
 }
 
 const SCREEN_WIDTH_USIZE:usize = 320;
@@ -311,16 +322,21 @@ impl LogicState {
         return LogicState {
             rng:rand::thread_rng(),
             new_room: 0,
+            text_mode:false,
             input: false,
             horizon: 0,
             flag: [false;256],
             var: [0u8;256],
             objects: [Sprite::new();256],
-            string : [();256].map(|_| String::new()),
+            string: [();256].map(|_| String::new()),
+            prompt:'_',
+            key_len:0,
+            key_buffer:[0;256],
             video_buffer:[15;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
             priority_buffer:[4;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
             back_buffer:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
             post_sprites:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+            text_buffer:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
         }
     }
 
@@ -335,13 +351,29 @@ impl LogicState {
     pub fn get_num(&self,v:&TypeNum) -> u8 {
         return v.value;
     }
-    
+
     pub fn get_new_room(&self) -> u8 {
         return self.new_room;
     }
 
     pub fn get_message(&self,m:&TypeMessage) -> u8 {
         return m.value;
+    }
+
+    pub fn get_string(&self,s:&TypeString) -> &String {
+        return &self.string[s.value as usize];
+    }
+
+    pub fn get_prompt(&self) -> char {
+        return self.prompt;
+    }
+
+    pub fn is_text_mode(&self) -> bool {
+        return self.text_mode;
+    }
+    
+    pub fn get_mut_string(&mut self,s:&TypeString) -> &mut String {
+        return &mut self.string[s.value as usize];
     }
 
     pub fn get_random(&mut self,start:&TypeNum,end:&TypeNum) -> u8 {
@@ -360,6 +392,10 @@ impl LogicState {
         self.string[s.value as usize] = m.clone();
     }
     
+    pub fn set_prompt(&mut self,c:char) {
+        self.prompt = c;
+    }
+
     pub fn set_input(&mut self,b:bool) {
         self.input = b;
     }
@@ -374,6 +410,13 @@ impl LogicState {
 
     pub fn set_new_room(&mut self,r:u8) {
         self.new_room = r;
+    }
+
+    pub fn set_text_mode(&mut self,b:bool) {
+        self.text_mode=b;
+        if b {
+            self.text_buffer = [0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
+        }
     }
 
     pub fn object(&self,o:&TypeObject) -> &Sprite {
@@ -401,7 +444,22 @@ impl LogicState {
     }
 
     pub fn final_buffer(&self) -> &[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
-        return &&self.post_sprites;
+        if self.text_mode {
+            return &self.text_buffer;
+        } else {
+            return &self.post_sprites;
+        }
+    }
+
+    pub fn clear_keys(&mut self) {
+        self.key_len=0;
+    }
+
+    pub fn key_pressed(&mut self,ascii_code:u8) {
+        if self.key_len<256 {
+            self.key_buffer[self.key_len]=ascii_code;
+            self.key_len+=1;
+        }
     }
 
 }
@@ -1567,7 +1625,7 @@ impl LogicSequence {
             ConditionOperation::Has(_) =>  /* TODO */ false,
             ConditionOperation::PosN(_) => todo!(),
             ConditionOperation::Controller(_) => /* TODO */ false,
-            ConditionOperation::HaveKey(_) => /* TODO */ false,
+            ConditionOperation::HaveKey(_) => state.key_len>0,
             ConditionOperation::Said(_) => /* TODO */ false,
             ConditionOperation::ObjInBox(_) => todo!(),
             ConditionOperation::RightPosN(_) => todo!(),
@@ -1625,11 +1683,12 @@ impl LogicSequence {
         // score<- var 3
     }
 
-
     fn interpret_instruction(&self,resources:&GameResources,state:&mut LogicState,pc:&LogicExecutionPosition,action:&ActionOperation) -> Option<LogicExecutionPosition> {
 
         //println!("{:?}",state);
-        //println!("{:?}",action);
+        if true { //state.is_text_mode() {
+            println!("{:?}",action);
+        }
 
         match action {
             // Not complete
@@ -1641,13 +1700,14 @@ impl LogicSequence {
             ActionOperation::LoadPic((_var,)) => {/* NO-OP-RAGI */},
             ActionOperation::LoadLogic((_num,)) => {/* NO-OP-RAGI */},
             ActionOperation::LoadSound((_num,)) => {/* NO-OP-RAGI */},
+            ActionOperation::DiscardPic((var,)) => {/* NO-OP-RAGI */},
 
             // Everything else
             ActionOperation::If((condition,goto_if_false)) => if !Self::evaluate_condition(state,condition) { return Some(pc.jump(self,goto_if_false)); },
             ActionOperation::Goto((goto,)) => return Some(pc.jump(self, goto)),
             ActionOperation::Return(()) => return None,
-            ActionOperation::Call((num,)) => return Some(LogicExecutionPosition {logic_file:state.get_num(num) as usize, program_counter: 0}),
-            ActionOperation::CallV((var,)) => return Some(LogicExecutionPosition {logic_file:state.get_var(var) as usize, program_counter: 0}),
+            ActionOperation::Call((num,)) => return Some(LogicExecutionPosition {logic_file:state.get_num(num) as usize, program_counter: 0, user_input_request: false}),
+            ActionOperation::CallV((var,)) => return Some(LogicExecutionPosition {logic_file:state.get_var(var) as usize, program_counter: 0, user_input_request: false}),
             ActionOperation::AssignN((var,num)) => state.set_var(var,state.get_num(num)),
             ActionOperation::AssignV((var1,var2)) => state.set_var(var1,state.get_var(var2)),
             ActionOperation::NewRoom((num,)) => { state.set_new_room(state.get_num(num)); return None },
@@ -1685,6 +1745,7 @@ impl LogicSequence {
                 for y in start..=end {
                     for x in 0usize..SCREEN_WIDTH_USIZE {
                         state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
+                        state.text_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
                     }
                 }
             },
@@ -1694,11 +1755,71 @@ impl LogicSequence {
             ActionOperation::MoveObj((obj,num1,num2,num3,flag)) => { let x=state.get_num(num1); let y=state.get_num(num2); let s=state.get_num(num3); state.mut_object(obj).set_move(x, y, s, flag); },
             ActionOperation::Erase((obj,)) => state.mut_object(obj).set_visible(false),
             ActionOperation::Display((num1,num2,m)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; let x=state.get_num(num2); let y=state.get_num(num1); Self::display_text(resources,state,x,y,m); },
+            ActionOperation::DisplayV((var1,var2,var3)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(&TypeMessage::from(state.get_var(var3))) as usize]; let x=state.get_var(var2); let y=state.get_var(var1); Self::display_text(resources,state,x,y,m); },
             ActionOperation::ReverseLoop((obj,flag)) => state.mut_object(obj).set_one_shot_reverse(flag),
             ActionOperation::Random((num1,num2,var)) => { let r = state.get_random(num1,num2); state.set_var(var,r); },
             ActionOperation::Set((flag,)) => state.set_flag(flag, true),
             ActionOperation::SetV((var,)) => { let flag=&TypeFlag::from(state.get_var(var)); state.set_flag(flag, true); },
-            _ => panic!("TODO {:?}",action),
+            ActionOperation::TextScreen(()) => state.set_text_mode(true),
+            ActionOperation::GetString((s,m,num1,num2,num3)) => {
+                // This actually halts interpretter until the input string is entered
+                let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; 
+                let x=state.get_num(num2); 
+                let y=state.get_num(num1); 
+                let max_length = state.get_num(num3) as usize;
+                let mut new_string = state.get_string(s).clone();
+                let mut done = false;
+                for a in 0..state.key_len {
+                    let c = state.key_buffer[a];
+                    match c {
+                        13 => { done=true; break; },
+                        8 => { new_string.pop(); },
+                        b'a'..=b'z' => if new_string.len() < max_length {new_string.push(char::from(c)) },
+                        b'A'..=b'Z' => if new_string.len() < max_length {new_string.push(char::from(c)) },
+                        b'0'..=b'9' => if new_string.len() < max_length {new_string.push(char::from(c)) },
+                        32 => if new_string.len() < max_length {new_string.push(char::from(c)) },
+                        _ => {},
+                    }
+                }
+
+                *state.get_mut_string(s)=new_string;
+                // Go through keyboard buffer and append/remove keys?
+
+                let to_show = m.clone()+state.get_string(s).as_str()+state.get_prompt().to_string().as_str();
+                let to_show = to_show + format!("{:indent$}","",indent=(max_length+1) - state.get_string(s).len()).as_str();
+                Self::display_text(resources, state, x, y, &to_show);
+
+                // pull keycodes off buffer and update string, make me a method lalala
+
+                if !done {
+                    return Some(pc.user_input());
+                }
+
+            },
+            ActionOperation::Parse((s,)) => {
+                // Todo move to method - remove punctuation (assuming we allow it into here in the first place)
+                let s = state.get_string(s).trim().to_ascii_lowercase();
+                let mut words:Vec<u16>=Vec::new();
+                let mut ok=true;
+                for (index,w) in s.split(" ").enumerate() {
+                    let t = w.trim();
+                    if t.len()>0 {
+                        match resources.words.get(&t) {
+                            None => { state.set_var(&TypeVar::from(9), index as u8); ok=false; break; },    // might want to be 1's based?
+                            Some(0u16) => {},
+                            Some(b) => words.push(*b),
+                        }
+                    }
+                }
+
+                if ok {
+                    state.set_flag(&TypeFlag::from(2),true);
+                    state.set_flag(&TypeFlag::from(4),false);   //?
+                }
+            }
+            ActionOperation::SetCursorChar((m,)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; state.set_prompt(m.chars().next().unwrap()); },
+
+            _ => panic!("TODO {:?}:{:?}",pc,action),
         }
 
         return Some(pc.next());
@@ -1714,6 +1835,10 @@ impl LogicSequence {
             for xx in 0..8 {
                 if (bits & 0x80) == 0x80 {
                     state.back_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = 15;
+                    state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = 15;
+                } else {
+                    state.back_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = 0;
+                    state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = 0;
                 }
                 bits=bits<<1;
             }
@@ -1735,27 +1860,37 @@ impl LogicSequence {
 
 }
 
-#[derive(Copy,Clone)]
+#[derive(Copy,Clone,Debug)]
 pub struct LogicExecutionPosition {
     logic_file:usize,
     program_counter:usize,
+    user_input_request:bool,
 }
 
 impl LogicExecutionPosition {
     pub fn new(file:usize,pc:usize) -> LogicExecutionPosition {
-        return LogicExecutionPosition { logic_file: file, program_counter: pc };
+        return LogicExecutionPosition { logic_file: file, program_counter: pc, user_input_request: false };
+    }
+
+    pub fn user_input(&self) -> LogicExecutionPosition {
+        // will cause the interpretter to stop and return back to this location after a render tick
+        return LogicExecutionPosition { logic_file: self.logic_file, program_counter: self.program_counter, user_input_request: true };
     }
 
     pub fn next(&self) -> LogicExecutionPosition {
-        return LogicExecutionPosition { logic_file: self.logic_file, program_counter: self.program_counter+1 };
+        return LogicExecutionPosition { logic_file: self.logic_file, program_counter: self.program_counter+1, user_input_request: false };
     }
 
     pub fn jump(&self, sequence:&LogicSequence, goto:&TypeGoto) -> LogicExecutionPosition {
-        return LogicExecutionPosition { logic_file: self.logic_file, program_counter: sequence.lookup_offset(goto).unwrap() }
+        return LogicExecutionPosition { logic_file: self.logic_file, program_counter: sequence.lookup_offset(goto).unwrap(), user_input_request: false }
     }
 
     pub fn is_call(&self,logic_file:usize) -> bool {
         return self.logic_file!=logic_file;
+    }
+
+    pub fn is_input_request(&self) -> bool {
+        return self.user_input_request;
     }
 
     pub fn get_logic(&self) -> usize {

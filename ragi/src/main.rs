@@ -1,15 +1,14 @@
 
-use helpers::{conv_rgba, double_pic_width};
+use helpers::conv_rgba;
 use logic::{LogicResource, LogicSequence, LogicState, LogicExecutionPosition, TypeFlag, GameResources, TypeVar, render_sprites, update_sprites};
 
 
 use sdl2::pixels::Color;
 use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
+use sdl2::keyboard::{Keycode, Scancode};
 use sdl2::rect::Rect;
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 fn main() -> Result<(), String> {
 
@@ -37,15 +36,20 @@ fn main() -> Result<(), String> {
     'running: loop {
         canvas.set_draw_color(Color::RGB(0, 0, 0));
         canvas.clear();
+        interpretter.clear_keys();
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit {..} |
-                Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
+                Event::KeyDown { keycode: Some(Keycode::F12), .. } => {
                     break 'running;
                 },
+                Event::KeyDown { keycode: Some(code), ..} => {
+                    interpretter.key_code_pressed(code);
+                }
                 _ => {}
             }
         }
+
         // The rest of the game loop goes here...
         interpretter.run();
 
@@ -66,7 +70,7 @@ fn main() -> Result<(), String> {
         canvas.copy(&foreground, None, Rect::new(0,0,640,400)).unwrap();
 
         canvas.present();
-        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
+        //::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
     }
 
     Ok(())
@@ -75,6 +79,7 @@ fn main() -> Result<(), String> {
 struct Interpretter {
     resources:GameResources,
     state:LogicState,
+    stack:Vec<LogicExecutionPosition>,
 }
 
 impl Interpretter {
@@ -83,56 +88,99 @@ impl Interpretter {
         return Ok(Interpretter {
             resources,
             state: LogicState::new(),
+            stack: Vec::new(),
         });
     }
 
-    pub fn do_call(resources:&GameResources,state:&mut LogicState, entry:&LogicExecutionPosition, logics:&HashMap<usize,LogicResource>) {
-        let logic_sequence = logics[&entry.get_logic()].get_logic_sequence();
-        let actions = logic_sequence.get_operations();
-        let mut exec = *entry;
-        loop {
-            match logic_sequence.interpret_instructions(resources,state,&exec,&actions) {
-                Some(newpc) => {
-                    if newpc.is_call(entry.get_logic()) {
-                        Self::do_call(resources, state,&newpc,logics);
-                        exec=exec.next();
-                    } else {
-                        exec = newpc;
-                    }
-                },
-                None => break,
+    pub fn do_call(resources:&GameResources,stack:&mut Vec<LogicExecutionPosition>,state:&mut LogicState, logics:&HashMap<usize,LogicResource>) {
+
+        while !stack.is_empty() {
+            let stack_pos = stack.len()-1;
+            let entry = stack[stack_pos];
+            let logic_sequence = logics[&entry.get_logic()].get_logic_sequence();
+            let actions = logic_sequence.get_operations();
+            let mut exec = entry;
+            loop {
+                match logic_sequence.interpret_instructions(resources,state,&exec,&actions) {
+                    Some(newpc) => {
+                        if newpc.is_input_request() {
+                            stack[stack_pos]=newpc;
+                            return;
+                        } else if newpc.is_call(entry.get_logic()) {
+                            stack[stack_pos]=exec.next();
+                            stack.push(newpc);
+                            break;
+                        } else {
+                            exec = newpc;
+                        }
+                    },
+                    None => {
+                        stack.pop();
+                        break;
+                    },
+                }
             }
         }
+
     }
 
-    pub fn call(resources:&GameResources,state:&mut LogicState,logic_file:usize, logics:&HashMap<usize,LogicResource>) {
+    pub fn call(resources:&GameResources,stack:&mut Vec<LogicExecutionPosition>,state:&mut LogicState,logic_file:usize, logics:&HashMap<usize,LogicResource>) {
+        if stack.is_empty() {
+            stack.push(LogicExecutionPosition::new(logic_file,0));
+        }
+        Self::do_call(resources, stack, state,logics);
+    }
 
-        let exec = LogicExecutionPosition::new(logic_file,0);
-        Self::do_call(resources, state,&exec,logics);
+    pub fn key_code_pressed(&mut self,key_code:Keycode) {
+        let mutable_state = &mut self.state;
+
+        if (key_code as u32) <256 {
+            mutable_state.key_pressed(key_code as u8);
+        }
+    }
+    
+    pub fn clear_keys(&mut self) {
+        let mutable_state = &mut self.state;
+
+        mutable_state.clear_keys();
     }
 
     pub fn run(&mut self) {
 
+        let mut resuming = !self.stack.is_empty();
         let mutable_state = &mut self.state;
+        let mutable_stack = &mut self.stack;
 
-        // delay
-        // clear keybuffer
+        if !resuming {
+            // delay
+            // clear keybuffer
 
-        mutable_state.set_flag(&TypeFlag::from(2), false);
-        mutable_state.set_flag(&TypeFlag::from(4), false);
-        // poll keyb/joystick
-        // if program.control (EGO dir = var(6))
-        // if player.control (var(6) = EGO dir)
-        // For all objects wich animate.obj,start_update and draw
-        //  recaclc dir of movement
-        update_sprites(&self.resources,mutable_state);
+            mutable_state.set_flag(&TypeFlag::from(2), false);
+            mutable_state.set_flag(&TypeFlag::from(4), false);
+            // poll keyb/joystick
+            // if program.control (EGO dir = var(6))
+            // if player.control (var(6) = EGO dir)
+            // For all objects wich animate.obj,start_update and draw
+            //  recaclc dir of movement
+            update_sprites(&self.resources,mutable_state);
 
-        // If score has changed(var(3)) or sound has turned off/on (flag(9)), update status line
+            // If score has changed(var(3)) or sound has turned off/on (flag(9)), update status line
+        }
         
         loop {
-            // Execute Logic 0
-            mutable_state.reset_new_room();
-            Self::call(&self.resources,mutable_state, 0, &self.resources.logic);
+
+            if !resuming {
+                // Execute Logic 0
+                mutable_state.reset_new_room();
+            }
+            
+            Self::call(&self.resources,mutable_stack,mutable_state, 0, &self.resources.logic);
+            if !mutable_stack.is_empty() {
+                return;
+            } else {
+                resuming=false;
+            }
+
             // dir of EGO <- var(6)
             mutable_state.set_var(&TypeVar::from(5), 0);
             mutable_state.set_var(&TypeVar::from(4), 0);
@@ -149,6 +197,5 @@ impl Interpretter {
         }
 
         render_sprites(&self.resources,mutable_state);
-
     }
 }

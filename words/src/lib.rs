@@ -10,7 +10,7 @@ mod tests
         let mut test_data:Vec<u8> = Vec::from([0u8;52]);
         test_data.extend_from_slice(&[0u8,(b'a'^0x7F)|0x80,0x12,0x34]);
         let words = Words::new(test_data.into_iter()).unwrap();
-        assert_eq!(words[String::from("a")],0x1234);
+        assert_eq!(words[&"a"],0x1234);
     }
     
     #[test]
@@ -18,7 +18,7 @@ mod tests
         let mut test_data:Vec<u8> = Vec::from([0u8;52]);
         test_data.extend_from_slice(&[0u8,(b'a'^0x7F)|0x80,0x12,0x34,0]);
         let words = Words::new(test_data.into_iter()).unwrap();
-        assert_eq!(words[String::from("a")],0x1234);
+        assert_eq!(words[&"a"],0x1234);
     }
 
     #[test]
@@ -40,11 +40,11 @@ pub struct Words {
     words : HashMap<String,u16>,
 }
 
-impl Index<String> for Words {
+impl Index<&str> for Words {
     type Output = u16;
 
-    fn index(&self, index: String) -> &Self::Output {
-        self.words.index(&index)
+    fn index(&self, index:&str) -> &Self::Output {
+        self.words.index(index)
     }
 }
 
@@ -116,5 +116,9 @@ impl Words {
             }
         }
         return result;
+    }
+
+    pub fn get(&self,s:&str) -> Option<&u16> {
+        return self.words.get(s);
     }
 }
