@@ -2,7 +2,7 @@ use std::{collections::HashMap, hash::Hash, ops, fmt, fs};
 
 use dir_resource::{ResourceDirectoryEntry, ResourceDirectory};
 use fixed::{FixedU16, types::extra::U8, FixedI32};
-use helpers::Root;
+use helpers::{Root, double_pic_width};
 use objects::Objects;
 use picture::*;
 use rand::{Rng, prelude::ThreadRng};
@@ -90,6 +90,28 @@ impl Sprite {
         return self.ey;
     }
 
+    pub fn get_priority(&self) -> u8 {
+        if self.priority == 0 {
+            // Automatic priority
+            let y:u8 = self.y.to_num();
+            return match y {
+                0..=47    => 4,
+                48..=59   => 5,
+                60..=71   => 6,
+                72..=83   => 7,
+                84..=95   => 8,
+                96..=107  => 9,
+                108..=119 => 10,
+                120..=131 => 11,
+                132..=143 => 12,
+                144..=155 => 13,
+                156..=167 => 14,
+                _         => 15,
+            }
+        } else {
+            return self.priority
+        }
+    }
 
     pub fn set_active(&mut self,b:bool) {
         self.active=b;
@@ -131,6 +153,10 @@ impl Sprite {
 
     pub fn set_priority(&mut self,n:u8) {
         self.priority = n;
+    }
+
+    pub fn set_priority_auto(&mut self) {
+        self.priority = 0;
     }
    
     pub fn set_loop(&mut self,n:u8) {
@@ -277,7 +303,7 @@ pub struct LogicState {
     post_sprites:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
 }
 
-const SCREEN_WIDTH_USIZE:usize = PIC_WIDTH_USIZE;
+const SCREEN_WIDTH_USIZE:usize = 320;
 const SCREEN_HEIGHT_USIZE:usize = 200;
 
 impl LogicState {
@@ -1645,18 +1671,19 @@ impl LogicSequence {
             ActionOperation::SetCel((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_cel(n); },
             ActionOperation::DrawPic((var,)) => { let n = state.get_var(var); resources.pictures[&usize::from(n)].render_to(&mut state.video_buffer,&mut state.priority_buffer).unwrap(); },
             ActionOperation::ShowPic(()) => {
+                let dpic = double_pic_width(state.picture());
                 for y in 0usize..PIC_HEIGHT_USIZE {
-                    for x in 0usize..PIC_WIDTH_USIZE {
-                        state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = state.picture()[x+y*PIC_WIDTH_USIZE];
+                    for x in 0usize..PIC_WIDTH_USIZE*2 {
+                        state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = dpic[x+y*SCREEN_WIDTH_USIZE];
                     }
                 }
             },
             ActionOperation::ClearLines((num1,num2,num3)) => {
                 let start=usize::from(state.get_num(num1) * 8);
-                let end = usize::from(state.get_num(num2) * 8);
+                let end = usize::from(state.get_num(num2) * 8)+7;
                 let col = state.get_num(num3);
                 for y in start..=end {
-                    for x in 0usize..PIC_WIDTH_USIZE {
+                    for x in 0usize..SCREEN_WIDTH_USIZE {
                         state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
                     }
                 }
@@ -1677,29 +1704,28 @@ impl LogicSequence {
         return Some(pc.next());
     }
  
-    pub fn render_glyph(resources:&GameResources,state:&mut LogicState,x:u8,y:u8,g:u8) {
+    pub fn render_glyph(resources:&GameResources,state:&mut LogicState,x:u16,y:u8,g:u8) {
         let s = resources.font.as_slice();
         let x = x as usize;
         let y = y as usize;
         for yy in 0..8 {
             let index = (g as usize)*8 + 4 + yy;
             let mut bits = s[index];
-            for xx in 0..4 {
+            for xx in 0..8 {
                 if (bits & 0x80) == 0x80 {
                     state.back_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = 15;
                 }
-                bits=bits<<2;
+                bits=bits<<1;
             }
         }
     }
 
-    // FIX ME - need to make back_buffer 320 wide, and deal with fallout of that
     pub fn display_text(resources:&GameResources,state:&mut LogicState,x:u8,y:u8,s:&String) {
-        let mut x = x*4;
+        let mut x = (x as u16)*8;
         let y=y*8;
         for l in s.as_bytes() {
             Self::render_glyph(resources, state, x, y, *l);
-            x+=4;
+            x+=8;
         }
     }
 
@@ -1768,6 +1794,19 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
     }
 }
 
+pub fn fetch_priority_for_pixel(state:&LogicState,x:usize,y:usize) -> u8 {
+    let mut pri:u8 = 0;
+    let mut y = y;
+    while y<168 && pri<4 {
+        pri = state.priority()[x+y*PIC_WIDTH_USIZE];
+        y+=1;
+    }
+    if pri<4 {
+        return 15;  // bottom of screen
+    }
+    return pri;
+}
+
 pub fn render_sprites(resources:&GameResources,state:&mut LogicState) {
     state.post_sprites = state.back_buffer;
 
@@ -1783,26 +1822,7 @@ pub fn render_sprites(resources:&GameResources,state:&mut LogicState) {
 
         if obj.visible {
 
-            let x = usize::from(obj.get_x());
-            let y = usize::from(obj.get_y());
-            let h = usize::from(cell.get_height());
-            let w = usize::from(cell.get_width());
-            let t = cell.get_transparent_colour();
-            let d = cell.get_data();
-
-            for yy in 0..h {
-                for xx in 0..w {
-                    let col = d[xx+yy*w];
-                    if col != t {
-                        let sx = xx+x;
-                        let sy=yy+y-h;
-                        let pri = state.priority()[sx+sy*PIC_WIDTH_USIZE];
-                        if pri <= obj.priority {
-                            state.post_sprites[sx+sy*SCREEN_WIDTH_USIZE]=col;
-                        }
-                    }
-                }
-            }
+            render_sprite(obj, cell, state);
         }
 
         let obj_num = TypeObject::from(num as u8);
@@ -1835,4 +1855,29 @@ pub fn render_sprites(resources:&GameResources,state:&mut LogicState) {
         }
     }
 
+}
+
+fn render_sprite(obj: Sprite, cell: &view::ViewCel, state: &mut LogicState) {
+    let x = usize::from(obj.get_x());
+    let y = usize::from(obj.get_y());
+    let h = usize::from(cell.get_height());
+    let w = usize::from(cell.get_width());
+    let t = cell.get_transparent_colour();
+    let d = cell.get_data();
+    for yy in 0..h {
+        for xx in 0..w {
+            let col = d[xx+yy*w];
+            if col != t {
+                let sx = xx+x;
+                let sy=yy+y-h;
+                let pri = fetch_priority_for_pixel(state,sx,sy);
+                if pri <= obj.get_priority() {
+                    // We double the pixels of sprites at this point
+                    let coord = sx*2+sy*SCREEN_WIDTH_USIZE;
+                    state.post_sprites[coord]=col;
+                    state.post_sprites[coord+1]=col;
+                }
+            }
+        }
+    }
 }

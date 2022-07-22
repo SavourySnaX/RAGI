@@ -74,7 +74,7 @@ pub fn conv_greyscale(data: &Vec<u8>) -> Vec<u8> {
     return out_vec;
 }
 
-pub fn conv_rgba(data: &Vec<u8>) -> Vec<u8> {
+pub fn conv_rgba(data: &[u8]) -> Vec<u8> {
     let mut out_vec = Vec::new();
     out_vec.reserve(data.len()*4);
     for a in data {

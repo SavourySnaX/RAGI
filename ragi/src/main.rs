@@ -50,8 +50,7 @@ fn main() -> Result<(), String> {
         interpretter.run();
 
         // Update our texture from our back buffer
-        let pic = double_pic_width(interpretter.state.final_buffer());
-        let pic = conv_rgba(&pic);
+        let pic = conv_rgba(interpretter.state.final_buffer());
 
         let mut vec:Vec<u8> = vec![0u8;320*200*4];//Vec::new();
         for y in 0usize..200 {
