@@ -42,7 +42,7 @@ fn dump_view_resource(root:&Root,entry:&ResourceDirectoryEntry, index:usize) {
     println!("{}-Description : {}",index, view.get_description());
     for (l_index,l) in view.get_loops().iter().enumerate() {
         for (c_index,c) in l.get_cels().iter().enumerate() {
-            let doubled_width = double_width(&c.get_data());
+            let doubled_width = double_width(c.get_data());
 
             let rgba = conv_rgba_transparent(&doubled_width, c.get_transparent_colour());
 

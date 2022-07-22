@@ -15,26 +15,25 @@ pub struct PictureResource
 
 impl PictureResource {
     pub fn new(volume:&Volume, entry: &ResourceDirectoryEntry) -> Result<PictureResource, String> {
-
         let picture_data = volume.fetch_data_slice(entry)?.to_vec();
-        return Ok(PictureResource { picture_data });
+        Ok(PictureResource { picture_data })
     }
 
     pub fn render_to(&self,picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE]) -> Result<(), String> {
         *picture = [15u8;(PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE) as usize];
         *priority = [4u8;(PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE) as usize];
         draw_picture(&self.picture_data,picture,priority)?;
-        return Ok(());
+        Ok(())
     }
     pub fn render(&self) -> Result<([u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE]), String> {
         let mut picture = [15u8;(PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE) as usize];
         let mut priority =[4u8;(PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE) as usize];
         draw_picture(&self.picture_data,&mut picture,&mut priority)?;
-        return Ok((picture,priority));
+        Ok((picture,priority))
     }
 }
 
-fn draw_picture(picture_data:&Vec<u8>, picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE], priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE]) -> Result<(), String> {
+fn draw_picture(picture_data:&[u8], picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE], priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE]) -> Result<(), String> {
 
     let mut volume_iter = picture_data.iter().peekable();
 
@@ -43,15 +42,15 @@ fn draw_picture(picture_data:&Vec<u8>, picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIG
     let mut colour_on=false;
     let mut priority_on=false;
 
-    let mut plot_pen_size:u8 = 0;
-    let mut plot_pen_splatter=false;
-    let mut plot_pen_rectangle:bool=true;
+    let plot_pen_size:u8 = 0;
+    let plot_pen_splatter=false;
+    let plot_pen_rectangle:bool=true;
 
     while let Some(b) = volume_iter.next() {
         match b {
-            0xF0 => { colour_on=true; colour_pen=*volume_iter.next().unwrap(); },
+            0xF0 => { colour_on=true; colour_pen= *volume_iter.next().unwrap(); },
             0xF1 => { colour_on=false; },
-            0xF2 => { priority_on=true; priority_pen=*volume_iter.next().unwrap(); },
+            0xF2 => { priority_on=true; priority_pen= *volume_iter.next().unwrap(); },
             0xF3 => { priority_on=false; },
             0xF4 => { alternate_line(picture,priority,colour_on,priority_on,colour_pen,priority_pen,&mut volume_iter, false); }
             0xF5 => { alternate_line(picture,priority,colour_on,priority_on,colour_pen,priority_pen,&mut volume_iter, true); }
@@ -65,7 +64,7 @@ fn draw_picture(picture_data:&Vec<u8>, picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIG
         }
     }
 
-    return Ok(());
+    Ok(())
 }
 
 fn rasterise_plot(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8, x:i16, y:i16) {
@@ -128,15 +127,15 @@ fn rasterise_line(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&m
             if x == x1 {
                 break;
             }
-            error = error + dy;
-            x = x + sx;
+            error += dy;
+            x += sx;
         }
         if e2 <= dx {
             if y == y1 {
                 break;
             }
-            error = error + dx;
-            y = y + sy;
+            error += dx;
+            y += sy;
         }
     }
 
@@ -207,7 +206,7 @@ where I: Iterator<Item = &'a u8> {
         } else {
             y1 = n;
         }
-        x=!x;
+        x= !x;
 
         rasterise_line(picture, priority, colour_on, priority_on, colour_pen, priority_pen, (*x0).into(), (*y0).into(), (*x1).into(), (*y1).into());
 
@@ -241,9 +240,9 @@ where I: Iterator<Item = &'a u8> {
 
 fn decode_relative(rel:u8) -> i16 {
     if (rel & 8) == 8 {
-        return 0i16-((rel&7) as i16);
+        0i16-((rel&7) as i16)
     } else {
-        return (rel&7) as i16;
+        (rel&7) as i16
     }
 }
 

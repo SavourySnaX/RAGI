@@ -59,8 +59,9 @@ impl IntoIterator for Words {
 
 impl Words {
     pub fn blank() -> Words {
-        return Words {words:HashMap::new()};
+        Words {words:HashMap::new()}
     }
+
     pub fn new(bytes: impl Iterator<Item = u8>) -> Result<Words,&'static str> {
 
         let mut words: HashMap<String,u16> = HashMap::new();
@@ -75,7 +76,7 @@ impl Words {
             // First byte = num chars from previous word
             last_word=last_word.chars().into_iter().take(b as usize).collect();
 
-            while let Some(b) = bytes.next() {
+            for b in bytes.by_ref() {
                 let b = b ^ 0x7F;
                 let is_last = b&0x80==0x80;
                 let b=b&0x7F;
@@ -102,7 +103,7 @@ impl Words {
                 }
             }
         }
-        if words.len()==0 {
+        if words.is_empty() {
             return Err("There should be at least 1 word!");
         }
         Ok(Words {words})
@@ -115,10 +116,10 @@ impl Words {
                 result.push(name.clone());
             }
         }
-        return result;
+        result
     }
 
     pub fn get(&self,s:&str) -> Option<&u16> {
-        return self.words.get(s);
+        self.words.get(s)
     }
 }

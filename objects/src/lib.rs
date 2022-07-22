@@ -14,16 +14,15 @@ pub struct Objects
 impl Objects {
 
     pub fn blank() -> Objects {
-        return Objects { max_objects: 0x2A, objects:Vec::new()}
+        Objects { max_objects: 0x2A, objects:Vec::new()}
     }
 
-    pub fn new(bytes: &Vec<u8>) -> Result<Objects,&'static str> {
+    pub fn new(bytes: &[u8]) -> Result<Objects,&'static str> {
 
         let mut objects:Vec<Object> = Vec::new();
 
-        let bytes_slice = &bytes[..];
-        let mut iter=bytes_slice.iter();
-        let slice = &bytes_slice[3..];
+        let mut iter=bytes.iter();
+        let slice = &bytes[3..];
 
         if let Some(b) = iter.next() {
             let lsb:usize = (*b).into();
@@ -31,7 +30,7 @@ impl Objects {
                 let msb:usize = (*b).into();
                 let pos:usize = (msb<<8)+lsb;
 
-                if pos>bytes_slice.len() {
+                if pos>bytes.len() {
                     return Err("corrupted objects file");
                 }
 
@@ -70,12 +69,12 @@ impl Objects {
                     }
                     return Ok(Objects { max_objects, objects });
                 }
-                return Err("Expected max objects byte");
+                Err("Expected max objects byte")
             } else {
-                return Err("Expected offset to names");
+                Err("Expected offset to names")
             }
         } else {
-            return Err("Expected offset to names");
+            Err("Expected offset to names")
         }
     }
 }

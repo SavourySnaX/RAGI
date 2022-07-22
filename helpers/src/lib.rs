@@ -48,7 +48,7 @@ pub fn double_pic_width(data:&[u8]) -> Vec<u8> {
         out_vec.push(*a);
         out_vec.push(*a);
     }
-    return out_vec;
+    out_vec
 }
 
 pub fn double_width(data:&Vec<u8>) -> Vec<u8> {
@@ -58,7 +58,7 @@ pub fn double_width(data:&Vec<u8>) -> Vec<u8> {
         out_vec.push(*a);
         out_vec.push(*a);
     }
-    return out_vec;
+    out_vec
 }
 
 pub fn conv_greyscale(data: &Vec<u8>) -> Vec<u8> {
@@ -71,7 +71,7 @@ pub fn conv_greyscale(data: &Vec<u8>) -> Vec<u8> {
         out_vec.push(255);
     }
 
-    return out_vec;
+    out_vec
 }
 
 pub fn conv_rgba(data: &[u8]) -> Vec<u8> {
@@ -81,11 +81,11 @@ pub fn conv_rgba(data: &[u8]) -> Vec<u8> {
         out_vec.extend_from_slice(&conv_colour(a,false));
     }
 
-    return out_vec;
+    out_vec
 }
 
 fn conv_colour(a: &u8, trans:bool) -> [u8;4] {
-    return match a {
+    match a {
         15..=255 => [255u8,255,255,if trans {0} else {255}],
               14 => [255u8,255,127,if trans {0} else {255}],
               13 => [255u8,127,255,if trans {0} else {255}],
@@ -112,17 +112,17 @@ pub fn conv_rgba_transparent(data: &Vec<u8>, trans_col:u8) -> Vec<u8> {
         out_vec.extend_from_slice(&conv_colour(a,*a==trans_col));
     }
 
-    return out_vec;
+    out_vec
 }
 
 use std::fs::{File, self};
 use std::path::Path;
 use std::io::BufWriter;
 
-pub fn dump_png(filepath: &str, width:u32, height:u32, data: &Vec<u8>) {
+pub fn dump_png(filepath: &str, width:u32, height:u32, data: &[u8]) {
     let path = Path::new(filepath);
     let file = File::create(path).unwrap();
-    let ref mut w = BufWriter::new(file);
+    let w = BufWriter::new(file);
 
     let mut encoder = png::Encoder::new(w, width, height);
     encoder.set_color(png::ColorType::Rgba);
@@ -152,6 +152,6 @@ impl<'a> Root<'_> {
     }
 
     pub fn read_data_or_default(&self,file:&str) -> Vec<u8> {
-        return fs::read(self.base_path.join(file).into_os_string()).unwrap_or_default();
+        fs::read(self.base_path.join(file).into_os_string()).unwrap_or_default()
     }
 }

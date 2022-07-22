@@ -18,25 +18,25 @@ pub struct ViewResource {
 
 impl ViewCel {
     pub fn get_transparent_colour(&self) -> u8 {
-        return self.flags&0xF;
+        self.flags&0xF
     }
 
     pub fn get_width(&self) -> u8 {
-        return self.width;
+        self.width
     }
 
     pub fn get_height(&self) -> u8 {
-        return self.height;
+        self.height
     }
 
     pub fn get_data(&self) -> &Vec<u8> {
-        return &self.data;
+        &self.data
     }
 }
 
 impl ViewLoop {
     pub fn get_cels(&self) -> &Vec<ViewCel> {
-        return &self.cels;
+        &self.cels
     }
 }
 
@@ -143,16 +143,15 @@ impl ViewResource {
             loops.push(ViewLoop { cels });
         }
 
-        return Ok(ViewResource {description, loops});
-
+        Ok(ViewResource {description, loops})
     }
 
     pub fn get_description(&self) ->&String {
-        return &self.description;
+        &self.description
     }
 
     pub fn get_loops(&self) -> &Vec<ViewLoop> {
-        return &self.loops;
+        &self.loops
     }
 
 }

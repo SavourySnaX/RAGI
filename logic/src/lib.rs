@@ -38,9 +38,15 @@ pub struct Sprite {
     step_size:FP16,
 }
 
+impl Default for Sprite {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Sprite {
     pub fn new() -> Sprite {
-        return Sprite { 
+        Sprite { 
             active: false, 
             visible: false,
             observing: false, 
@@ -59,42 +65,42 @@ impl Sprite {
             ex: FP16::from_num(0),
             ey: FP16::from_num(0),
             step_size: FP16::from_num(0),
-        };
+        }
     }
 
     pub fn get_x(&self) -> u8 {
-        return self.x.to_num();
+        self.x.to_num()
     }
     
     pub fn get_y(&self) -> u8 {
-        return self.y.to_num();
+        self.y.to_num()
     }
 
     pub fn get_x_fp16(&self) -> FP16 {
-        return self.x;
+        self.x
     }
     
     pub fn get_y_fp16(&self) -> FP16 {
-        return self.y;
+        self.y
     }
 
     pub fn get_step_size(&self) -> FP16 {
-        return self.step_size;
+        self.step_size
     }
 
     pub fn get_end_x(&self) -> FP16 {
-        return self.ex;
+        self.ex
     }
     
     pub fn get_end_y(&self) -> FP16 {
-        return self.ey;
+        self.ey
     }
 
     pub fn get_priority(&self) -> u8 {
         if self.priority == 0 {
             // Automatic priority
             let y:u8 = self.y.to_num();
-            return match y {
+            match y {
                 0..=47    => 4,
                 48..=59   => 5,
                 60..=71   => 6,
@@ -109,7 +115,7 @@ impl Sprite {
                 _         => 15,
             }
         } else {
-            return self.priority
+            self.priority
         }
     }
 
@@ -188,7 +194,7 @@ impl Sprite {
         self.ex=FP16::from_num(x);
         self.ey=FP16::from_num(y);
         self.step_size=FP16::from_bits((s as u16)<<6);
-        self.move_flag=*f;
+        self.move_flag= *f;
     }
 
     pub fn clear_move(&mut self) {
@@ -236,9 +242,9 @@ impl GameResources {
         views.reserve(256);
         for (index,entry) in dir.into_iter().enumerate() {
             if !entry.empty() {
-                if !volumes.contains_key(&entry.volume) {
+                if let std::collections::hash_map::Entry::Vacant(e) =volumes.entry(entry.volume) {
                     let bytes = root.read_data_or_default(format!("VOL.{}", entry.volume).as_str());
-                    volumes.insert(entry.volume, Volume::new(bytes.into_iter())?);
+                    e.insert(Volume::new(bytes.into_iter())?);
                 }
                 views.insert(index, ViewResource::new(&volumes[&entry.volume],&entry)?);
             }
@@ -251,9 +257,9 @@ impl GameResources {
         pictures.reserve(256);
         for (index,entry) in dir.into_iter().enumerate() {
             if !entry.empty() {
-                if !volumes.contains_key(&entry.volume) {
+                if let std::collections::hash_map::Entry::Vacant(e) = volumes.entry(entry.volume) {
                     let bytes = root.read_data_or_default(format!("VOL.{}", entry.volume).as_str());
-                    volumes.insert(entry.volume, Volume::new(bytes.into_iter())?);
+                    e.insert(Volume::new(bytes.into_iter())?);
                 }
                 pictures.insert(index, PictureResource::new(&volumes[&entry.volume],&entry)?);
             }
@@ -266,9 +272,9 @@ impl GameResources {
         logic.reserve(256);
         for (index,entry) in dir.into_iter().enumerate() {
             if !entry.empty() {
-                if !volumes.contains_key(&entry.volume) {
+                if let std::collections::hash_map::Entry::Vacant(e) = volumes.entry(entry.volume) {
                     let bytes = root.read_data_or_default(format!("VOL.{}", entry.volume).as_str());
-                    volumes.insert(entry.volume, Volume::new(bytes.into_iter())?);
+                    e.insert(Volume::new(bytes.into_iter())?);
                 }
                 logic.insert(index, LogicResource::new(&volumes[&entry.volume],&entry)?);
             }
@@ -317,9 +323,15 @@ pub struct LogicState {
 const SCREEN_WIDTH_USIZE:usize = 320;
 const SCREEN_HEIGHT_USIZE:usize = 200;
 
+impl Default for LogicState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LogicState {
     pub fn new() -> LogicState {
-        return LogicState {
+        LogicState {
             rng:rand::thread_rng(),
             new_room: 0,
             text_mode:false,
@@ -341,43 +353,43 @@ impl LogicState {
     }
 
     pub fn get_flag(&self,f:&TypeFlag) -> bool {
-        return self.flag[f.value as usize];
+        self.flag[f.value as usize]
     }
 
     pub fn get_var(&self,v:&TypeVar) -> u8 {
-        return self.var[v.value as usize];
+        self.var[v.value as usize]
     }
 
     pub fn get_num(&self,v:&TypeNum) -> u8 {
-        return v.value;
+        v.value
     }
 
     pub fn get_new_room(&self) -> u8 {
-        return self.new_room;
+        self.new_room
     }
 
     pub fn get_message(&self,m:&TypeMessage) -> u8 {
-        return m.value;
+        m.value
     }
 
     pub fn get_string(&self,s:&TypeString) -> &String {
-        return &self.string[s.value as usize];
+        &self.string[s.value as usize]
     }
 
     pub fn get_prompt(&self) -> char {
-        return self.prompt;
+        self.prompt
     }
 
     pub fn is_text_mode(&self) -> bool {
-        return self.text_mode;
+        self.text_mode
     }
     
     pub fn get_mut_string(&mut self,s:&TypeString) -> &mut String {
-        return &mut self.string[s.value as usize];
+        &mut self.string[s.value as usize]
     }
 
     pub fn get_random(&mut self,start:&TypeNum,end:&TypeNum) -> u8 {
-        return self.rng.gen_range(self.get_num(start)..self.get_num(end));
+        self.rng.gen_range(self.get_num(start)..self.get_num(end))
     }
 
     pub fn set_var(&mut self,v:&TypeVar,n:u8) {
@@ -388,8 +400,8 @@ impl LogicState {
         self.flag[f.value as usize] = n;
     }
 
-    pub fn set_string(&mut self,s:&TypeString,m:&String) {
-        self.string[s.value as usize] = m.clone();
+    pub fn set_string(&mut self,s:&TypeString,m:&str) {
+        self.string[s.value as usize] = m.to_owned();
     }
     
     pub fn set_prompt(&mut self,c:char) {
@@ -420,34 +432,34 @@ impl LogicState {
     }
 
     pub fn object(&self,o:&TypeObject) -> &Sprite {
-        return &self.objects[o.value as usize];
+        &self.objects[o.value as usize]
     }
 
     pub fn mut_object(&mut self,o:&TypeObject) -> &mut Sprite {
-        return &mut self.objects[o.value as usize];
+        &mut self.objects[o.value as usize]
     }
 
     pub fn active_objects(&self) -> impl Iterator<Item = (usize,Sprite)> {
-        return self.objects.into_iter().take_while(|x| x.active).enumerate();
+        self.objects.into_iter().take_while(|x| x.active).enumerate()
     }
 
     pub fn picture(&self) -> &[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
-        return &self.video_buffer;
+        &self.video_buffer
     }
     
     pub fn priority(&self) -> &[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
-        return &self.priority_buffer;
+        &self.priority_buffer
     }
 
     pub fn back_buffer(&self) -> &[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
-        return &self.back_buffer;
+        &self.back_buffer
     }
 
     pub fn final_buffer(&self) -> &[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
         if self.text_mode {
-            return &self.text_buffer;
+            &self.text_buffer
         } else {
-            return &self.post_sprites;
+            &self.post_sprites
         }
     }
 
@@ -545,9 +557,9 @@ impl From<i16> for TypeGoto {
 impl ops::Add<TypeGoto> for TypeGoto {
     type Output = TypeGoto;
     fn add(self, rhs:TypeGoto) -> Self::Output {
-        let a:i16 = self.value.into();
-        let b:i16 = rhs.value.into();
-        return (a+b).into();
+        let a:i16 = self.value;
+        let b:i16 = rhs.value;
+        (a+b).into()
     }
 }
 
@@ -723,8 +735,7 @@ pub enum ActionOperation {
 impl LogicMessages {
     fn new(text_slice: &[u8]) -> Result<LogicMessages,&'static str> {
         // unpack the text data first
-        let mut strings:Vec<String> = Vec::new();
-        strings.push("".to_string());   // Push [0] "" string, since messages start counting from 1
+        let mut strings:Vec<String> = vec!["".to_string()]; // Push [0] "" string, since messages start counting from 1
 
         let mut iter = text_slice.iter();
         let num_messages = iter.next();
@@ -819,7 +830,7 @@ impl LogicResource {
     }
 
     pub fn get_logic_sequence(&self) -> &LogicSequence {
-        return &self.logic_sequence;
+        &self.logic_sequence
     }
 
     fn disassemble_words(words:&Words,word_num:u16) -> String {
@@ -840,46 +851,46 @@ impl LogicResource {
             string+=")";
         }
 
-        return string;
+        string
     }
 
     fn param_dis_num(t:&TypeNum) -> String {
-        return format!("{}",t.value);
+        format!("{}",t.value)
     }
 
     fn param_dis_flag(t:&TypeFlag) -> String {
-        return format!("flag:{}",t.value);
+        format!("flag:{}",t.value)
     }
 
     fn param_dis_var(t:&TypeVar) -> String {
-        return format!("var:{}",t.value);
+        format!("var:{}",t.value)
     }
 
     fn param_dis_object(t:&TypeObject) -> String {
-        return format!("obj:{}",t.value);
+        format!("obj:{}",t.value)
     }
 
     fn param_dis_item(t:&TypeItem,items:&Objects) -> String {
-        return format!("item:{}\"{}\"",t.value, items.objects[t.value as usize].name);
+        format!("item:{}\"{}\"",t.value, items.objects[t.value as usize].name)
     }
 
     fn param_dis_controller(t:&TypeController) -> String {
-        return format!("ctr:{}",t.value);
+        format!("ctr:{}",t.value)
     }
 
     fn param_dis_message(&self, t:&TypeMessage) -> String {
-        return format!("msg:{}\"{}\"",t.value,self.logic_messages.strings[(t.value) as usize]);
+        format!("msg:{}\"{}\"",t.value,self.logic_messages.strings[(t.value) as usize])
     }
 
     fn param_dis_string(t:&TypeString) -> String {
-        return format!("str:{}",t.value);
+        format!("str:{}",t.value)
     }
 
     fn param_dis_word(t:&TypeWord,words:&Words) -> String {
-        return Self::disassemble_words(words,t.value);
+        Self::disassemble_words(words,t.value)
     }
 
-    fn param_dis_said(t:&Vec<TypeWord>,words:&Words) -> String {
+    fn param_dis_said(t:&[TypeWord],words:&Words) -> String {
         let mut string = String::new();
         for (index,w) in t.iter().enumerate() {
             if index != 0 {
@@ -887,7 +898,7 @@ impl LogicResource {
             }
             string+=Self::param_dis_word(w,words).as_str();
         }
-        return string;
+        string
     }
 
     pub fn logic_args_disassemble(operation:&ConditionOperation,words:&Words,items:&Objects) -> String {
@@ -912,29 +923,29 @@ impl LogicResource {
 
     pub fn logic_operation_disassemble(operation:&ConditionOperation,words:&Words,items:&Objects) -> String {
         let string = Self::logic_args_disassemble(operation,words,items);
-        return String::new() + operation.into() + "(" + &string + ")";
+        String::new() + operation.into() + "(" + &string + ")"
     }
 
-    pub fn logic_disassemble(logic:&Vec<LogicChange>,is_or:bool,words:&Words,items:&Objects) -> String {
+    pub fn logic_disassemble(logic:&[LogicChange],is_or:bool,words:&Words,items:&Objects) -> String {
         let mut string = String::new();
         for (index,l) in logic.iter().enumerate() {
             if index!=0 {
                 if is_or {
-                    string = string + " || ";
+                    string += " || ";
                 } else {
-                    string = string + " && ";
+                    string += " && ";
                 }
             }
-            string = string + &match l {
+            string += &match l {
                 LogicChange::Normal((e,)) => Self::logic_operation_disassemble(e,words,items),
                 LogicChange::Not((e,)) => String::from("!")+Self::logic_operation_disassemble(e,words,items).as_str(),
                 LogicChange::Or((e,)) => String::from("( ")+Self::logic_disassemble(e,true,words,items).as_str()+" )",
             };
         }
-        return string;
+        string
     }
 
-    pub fn action_args_disassemble(&self,action:&ActionOperation,words:&Words,items:&Objects) -> String {
+    pub fn action_args_disassemble(&self,action:&ActionOperation,_words:&Words,items:&Objects) -> String {
         return match action {
             ActionOperation::Return(_) |
             ActionOperation::ShowPic(_) |
@@ -1107,10 +1118,7 @@ impl LogicResource {
 
             println!("{:indent$}{v}","",v=self.instruction_disassemble(&logic_operation.action,words,items),indent=indent);
 
-            match logic_operation.action {
-                ActionOperation::If(_) => { println!("{:indent$}{{","",indent=indent);indent+=2; }
-                _ => {}
-            }
+            if let ActionOperation::If(_) = logic_operation.action { println!("{:indent$}{{","",indent=indent);indent+=2; }
         }
     }
 }
@@ -1128,7 +1136,7 @@ impl LogicSequence {
             return Err("Expected MSB of U16, but reached end of iterator");
         }
         let msb:i16 = (*msb.unwrap()).into();
-        return Ok(((msb<<8)+lsb).into());
+        Ok((msb<<8)+lsb)
     }
 
     fn read_little_endian_u16(iter:&mut std::slice::Iter<u8>) -> Result<u16, &'static str> {
@@ -1142,11 +1150,11 @@ impl LogicSequence {
             return Err("Expected MSB of U16, but reached end of iterator");
         }
         let msb:u16 = (*msb.unwrap()).into();
-        return Ok(((msb<<8)+lsb).into());
+        Ok((msb<<8)+lsb)
     }
 
     fn parse_goto(iter:&mut std::slice::Iter<u8>) -> Result<TypeGoto, &'static str> {
-        return Ok(Self::read_little_endian_i16(iter)?.into());
+        Ok(Self::read_little_endian_i16(iter)?.into())
     }
 
     fn parse_message(iter:&mut std::slice::Iter<u8>) -> Result<TypeMessage, &'static str> {
@@ -1154,7 +1162,7 @@ impl LogicSequence {
         if m.is_none() {
             return Err("Expected Message, but reached end of iterator");
         }
-        return Ok((*m.unwrap()).into());
+        Ok((*m.unwrap()).into())
     }
 
     fn parse_string(iter:&mut std::slice::Iter<u8>) -> Result<TypeString, &'static str> {
@@ -1162,7 +1170,7 @@ impl LogicSequence {
         if s.is_none() {
             return Err("Expected String, but reached end of iterator");
         }
-        return Ok((*s.unwrap()).into());
+        Ok((*s.unwrap()).into())
     }
 
     fn parse_object(iter:&mut std::slice::Iter<u8>) -> Result<TypeObject, &'static str> {
@@ -1170,7 +1178,7 @@ impl LogicSequence {
         if o.is_none() {
             return Err("Expected Object, but reached end of iterator");
         }
-        return Ok((*o.unwrap()).into());
+        Ok((*o.unwrap()).into())
     }
 
     fn parse_controller(iter:&mut std::slice::Iter<u8>) -> Result<TypeController, &'static str> {
@@ -1178,7 +1186,7 @@ impl LogicSequence {
         if c.is_none() {
             return Err("Expected Controller, but reached end of iterator");
         }
-        return Ok((*c.unwrap()).into());
+        Ok((*c.unwrap()).into())
     }
 
     fn parse_item(iter:&mut std::slice::Iter<u8>) -> Result<TypeItem, &'static str> {
@@ -1186,7 +1194,7 @@ impl LogicSequence {
         if i.is_none() {
             return Err("Expected Item, but reached end of iterator");
         }
-        return Ok((*i.unwrap()).into());
+        Ok((*i.unwrap()).into())
     }
 
     fn parse_flag(iter:&mut std::slice::Iter<u8>) -> Result<TypeFlag, &'static str> {
@@ -1194,7 +1202,7 @@ impl LogicSequence {
         if f.is_none() {
             return Err("Expected TypeFlag, but reached end of iterator");
         }
-        return Ok((*f.unwrap()).into());
+        Ok((*f.unwrap()).into())
     }
 
     fn parse_var(iter:&mut std::slice::Iter<u8>) -> Result<TypeVar, &'static str> {
@@ -1202,7 +1210,7 @@ impl LogicSequence {
         if v.is_none() {
             return Err("Expected TypeVariable, but reached end of iterator");
         }
-        return Ok((*v.unwrap()).into());
+        Ok((*v.unwrap()).into())
     }
     
     fn parse_num(iter:&mut std::slice::Iter<u8>) -> Result<TypeNum, &'static str> {
@@ -1210,11 +1218,11 @@ impl LogicSequence {
         if n.is_none() {
             return Err("Expected TypeNumber, but reached end of iterator");
         }
-        return Ok((*n.unwrap()).into());
+        Ok((*n.unwrap()).into())
     }
 
     fn parse_word(iter:&mut std::slice::Iter<u8>) -> Result<TypeWord, &'static str> {
-        return Ok(Self::read_little_endian_u16(iter)?.into());
+        Ok(Self::read_little_endian_u16(iter)?.into())
     }
 
     fn parse_said(iter:&mut std::slice::Iter<u8>) -> Result<Vec<TypeWord>, &'static str> {
@@ -1228,115 +1236,115 @@ impl LogicSequence {
         for _a in 0..cnt {
             words.push(Self::parse_word(iter)?);
         }
-        return Ok(words);
+        Ok(words)
     }
 
     fn parse_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum), &'static str> {
-        return Ok((Self::parse_num(iter)?,Self::parse_num(iter)?));
+        Ok((Self::parse_num(iter)?,Self::parse_num(iter)?))
     }
 
     fn parse_num_flag(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeFlag), &'static str> {
-        return Ok((Self::parse_num(iter)?,Self::parse_flag(iter)?));
+        Ok((Self::parse_num(iter)?,Self::parse_flag(iter)?))
     }
     
     fn parse_var_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeVar,TypeNum), &'static str> {
-        return Ok((Self::parse_var(iter)?,Self::parse_num(iter)?));
+        Ok((Self::parse_var(iter)?,Self::parse_num(iter)?))
     }
     
     fn parse_var_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeVar,TypeVar), &'static str> {
-        return Ok((Self::parse_var(iter)?,Self::parse_var(iter)?));
+        Ok((Self::parse_var(iter)?,Self::parse_var(iter)?))
     }
     
     fn parse_object_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeNum), &'static str> {
-        return Ok((Self::parse_object(iter)?,Self::parse_num(iter)?));
+        Ok((Self::parse_object(iter)?,Self::parse_num(iter)?))
     }
     
     fn parse_object_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeVar), &'static str> {
-        return Ok((Self::parse_object(iter)?,Self::parse_var(iter)?));
+        Ok((Self::parse_object(iter)?,Self::parse_var(iter)?))
     }
 
     fn parse_object_flag(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeFlag), &'static str> {
-        return Ok((Self::parse_object(iter)?,Self::parse_flag(iter)?));
+        Ok((Self::parse_object(iter)?,Self::parse_flag(iter)?))
     }
 
     fn parse_string_message(iter:&mut std::slice::Iter<u8>) -> Result<(TypeString,TypeMessage), &'static str> {
-        return Ok((Self::parse_string(iter)?,Self::parse_message(iter)?));
+        Ok((Self::parse_string(iter)?,Self::parse_message(iter)?))
     }
 
     fn parse_message_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeMessage,TypeVar), &'static str> {
-        return Ok((Self::parse_message(iter)?,Self::parse_var(iter)?));
+        Ok((Self::parse_message(iter)?,Self::parse_var(iter)?))
     }
 
     fn parse_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum,TypeNum), &'static str> {
-        return Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?));
+        Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?))
     }
 
     fn parse_num_num_message(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum,TypeMessage), &'static str> {
-        return Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_message(iter)?));
+        Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_message(iter)?))
     }
 
     fn parse_num_num_controller(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum,TypeController), &'static str> {
-        return Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_controller(iter)?));
+        Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_controller(iter)?))
     }
 
     fn parse_num_num_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum,TypeVar), &'static str> {
-        return Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_var(iter)?));
+        Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_var(iter)?))
     }
 
     fn parse_var_var_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeVar,TypeVar,TypeVar), &'static str> {
-        return Ok((Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?));
+        Ok((Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?))
     }
 
     fn parse_object_object_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeObject,TypeVar), &'static str> {
-        return Ok((Self::parse_object(iter)?,Self::parse_object(iter)?,Self::parse_var(iter)?));
+        Ok((Self::parse_object(iter)?,Self::parse_object(iter)?,Self::parse_var(iter)?))
     }
 
     fn parse_message_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeMessage,TypeNum,TypeNum), &'static str> {
-        return Ok((Self::parse_message(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?));
+        Ok((Self::parse_message(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?))
     }
 
     fn parse_object_var_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeVar,TypeVar), &'static str> {
-        return Ok((Self::parse_object(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?));
+        Ok((Self::parse_object(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?))
     }
 
     fn parse_object_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeNum,TypeNum), &'static str> {
-        return Ok((Self::parse_object(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?));
+        Ok((Self::parse_object(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?))
     }
 
     fn parse_object_num_flag(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeNum,TypeFlag), &'static str> {
-        return Ok((Self::parse_object(iter)?,Self::parse_num(iter)?,Self::parse_flag(iter)?));
+        Ok((Self::parse_object(iter)?,Self::parse_num(iter)?,Self::parse_flag(iter)?))
     }
 
     fn parse_num_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum,TypeNum,TypeNum), &'static str> {
-        return Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?));
+        Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?))
     }
     
     fn parse_object_num_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeNum,TypeNum,TypeNum,TypeNum), &'static str> {
-        return Ok((Self::parse_object(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?));
+        Ok((Self::parse_object(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?))
     }
     
     fn parse_object_num_num_num_flag(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeNum,TypeNum,TypeNum,TypeFlag), &'static str> {
-        return Ok((Self::parse_object(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_flag(iter)?));
+        Ok((Self::parse_object(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_flag(iter)?))
     }
     
     fn parse_object_var_var_var_flag(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeVar,TypeVar,TypeVar,TypeFlag), &'static str> {
-        return Ok((Self::parse_object(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_flag(iter)?));
+        Ok((Self::parse_object(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_flag(iter)?))
     }
     
     fn parse_string_message_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeString,TypeMessage,TypeNum,TypeNum,TypeNum), &'static str> {
-        return Ok((Self::parse_string(iter)?,Self::parse_message(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?));
+        Ok((Self::parse_string(iter)?,Self::parse_message(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?))
     }
 
     fn parse_num_num_num_num_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum,TypeNum,TypeNum,TypeNum,TypeNum,TypeNum), &'static str> {
-        return Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?));
+        Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?))
     }
     
     fn parse_var_var_var_var_var_var_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeVar,TypeVar,TypeVar,TypeVar,TypeVar,TypeVar,TypeVar), &'static str> {
-        return Ok((Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?));
+        Ok((Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?,Self::parse_var(iter)?))
     }
     
     fn parse_condition_with_code(iter:&mut std::slice::Iter<u8>, code:u8) -> Result<ConditionOperation, &'static str> {
-        return match code {
+        match code {
             0x12 => Ok(ConditionOperation::RightPosN(Self::parse_object_num_num_num_num(iter)?)),
             0x10 => Ok(ConditionOperation::ObjInBox(Self::parse_object_num_num_num_num(iter)?)),
             0x0E => Ok(ConditionOperation::Said((Self::parse_said(iter)?,))),
@@ -1361,7 +1369,7 @@ impl LogicSequence {
         if code.is_none() {
             return Err("Expected condition code, but reached end of iterator");
         }
-        return Self::parse_condition_with_code(iter,*(code.unwrap()));
+        Self::parse_condition_with_code(iter,*(code.unwrap()))
     }
 
     fn parse_or(iter:&mut std::slice::Iter<u8>) -> Result<Vec<LogicChange>, &'static str> {
@@ -1378,7 +1386,7 @@ impl LogicSequence {
                 _ => or.push(LogicChange::Normal((Self::parse_condition_with_code(iter, b)?,))),
             }
         }
-        return Ok(or);
+        Ok(or)
     }
 
     fn parse_vlogic_change_goto(iter:&mut std::slice::Iter<u8>) -> Result<(Vec<LogicChange>,TypeGoto), &'static str> {
@@ -1397,7 +1405,7 @@ impl LogicSequence {
         // Finally read the goto values
         let pos = Self::parse_goto(iter)?;
 
-        return Ok((conditions,pos));
+        Ok((conditions,pos))
     }
 
     fn new(logic_slice: &[u8]) -> Result<LogicSequence,&'static str> {
@@ -1564,27 +1572,19 @@ impl LogicSequence {
         let mut labels:HashMap<TypeGoto, Label>=HashMap::new();
         labels.reserve(operations.len());
         for (index,op) in operations.iter_mut().enumerate() {
-            let is_goto= match op.action {
-                ActionOperation::Goto(_) => true,
-                _ => false,
-            };
+            matches!(op.action, ActionOperation::Goto(_));
+            let is_goto= matches!(op.action, ActionOperation::Goto(_));
 
             let mut destination:TypeGoto = 0i16.into();
             match op.action {
                 ActionOperation::Goto((g,)) | ActionOperation::If((_,g)) => {
                     let base_offset=offsets_rev.get(&(index+1)).unwrap();
                     destination = *base_offset+g;
-                    if labels.contains_key(&destination) {
-                        if labels[&destination].operation_offset != offsets[&destination] {
-                            panic!("WUT!");
-                        }
-                        if is_goto {
-                            labels.get_mut(&destination).unwrap().is_goto_destination=true;
-                        } else {
-                            labels.get_mut(&destination).unwrap().if_destination_cnt+=1;
-                        }
-                    } else {
-                        labels.insert(destination, Label { is_goto_destination:is_goto, if_destination_cnt: if !is_goto {1} else {0}, operation_offset:offsets[&destination]});
+
+                    if let std::collections::hash_map::Entry::Vacant(e) = labels.entry(destination) {
+                        e.insert(Label { is_goto_destination:is_goto, if_destination_cnt: if !is_goto {1} else {0}, operation_offset:offsets[&destination]});
+                    } else if labels[&destination].operation_offset != offsets[&destination] {
+                        panic!("WUT!");
                     }
                 },
                 _ => {},
@@ -1598,29 +1598,26 @@ impl LogicSequence {
 
         operations.shrink_to_fit();
         labels.shrink_to_fit();
-        return Ok(LogicSequence { operations, labels });
+        Ok(LogicSequence { operations, labels })
     }
 
     pub fn get_operations(&self) -> &Vec<LogicOperation> {
-        return &self.operations;
+        &self.operations
     }
 
     pub fn lookup_offset(&self,goto:&TypeGoto) -> Option<usize> {
-        return match self.labels.get(goto) {
-            Some(b) => Some(b.operation_offset),
-            None => None,
-        };
+        self.labels.get(goto).map(|b| b.operation_offset)
     }
 
     fn evaluate_condition_operation(state:&LogicState,op:&ConditionOperation) -> bool {
-        return match op {
+        match op {
             ConditionOperation::EqualN((var,num)) => state.get_var(var) == state.get_num(num),
             ConditionOperation::EqualV((var1,var2)) => state.get_var(var1) == state.get_var(var2),
             ConditionOperation::LessN((var,num)) => state.get_var(var) < state.get_num(num),
             ConditionOperation::LessV((var1,var2)) => state.get_var(var1) < state.get_var(var2),
             ConditionOperation::GreaterN((var,num)) => state.get_var(var) > state.get_num(num),
             ConditionOperation::GreaterV((var1,var2)) => state.get_var(var1) > state.get_var(var2), 
-            ConditionOperation::IsSet((flag,)) => state.get_flag(flag) == true,
+            ConditionOperation::IsSet((flag,)) => state.get_flag(flag),
             ConditionOperation::IsSetV(_) => todo!(),
             ConditionOperation::Has(_) =>  /* TODO */ false,
             ConditionOperation::PosN(_) => todo!(),
@@ -1635,34 +1632,34 @@ impl LogicSequence {
     fn evaluate_condition_or(state:&LogicState,cond:&Vec<LogicChange>) -> bool {
         let mut result = false;
         for a in cond {
-            result = result | match a {
+            result |= match a {
                 LogicChange::Normal((op,)) => Self::evaluate_condition_operation(state,op),
                 LogicChange::Not((op,)) => !Self::evaluate_condition_operation(state,op),
                 _ => panic!("Should not occur i think {:?}", a),
             };
         }
-        return result;
+        result
     }
 
     fn evaluate_condition(state:&LogicState,cond:&Vec<LogicChange>) -> bool {
         let mut result = true;
         for a in cond {
-            result = result & match a {
+            result &= match a {
                 LogicChange::Normal((op,)) => Self::evaluate_condition_operation(state,op),
                 LogicChange::Not((op,)) => !Self::evaluate_condition_operation(state,op),
                 LogicChange::Or((or_block,)) => Self::evaluate_condition_or(state, or_block),
             };
-            if result==false {  // Early out evaluation
+            if !result {  // Early out evaluation
                 break;
             }
         }
-        return result;
+        result
     }
 
     pub fn new_room(state:&mut LogicState,room:u8) {
         // Stop.update()
         //unanimate.all()
-        for (num,obj) in state.active_objects() {
+        for (num,_) in state.active_objects() {
             state.mut_object(&TypeObject::from(num as u8)).active=false;
             //state.mut_object(&TypeObject::from(num as u8)).reset();  (may not be needed)
         }
@@ -1692,7 +1689,7 @@ impl LogicSequence {
 
         match action {
             // Not complete
-            ActionOperation::Sound((num,flag)) => /* TODO RAGI  - for now, just pretend sound finished*/ state.set_flag(flag,true),
+            ActionOperation::Sound((_num,flag)) => /* TODO RAGI  - for now, just pretend sound finished*/ state.set_flag(flag,true),
 
             // Not needed
             ActionOperation::LoadView((_num,)) => {/* NO-OP-RAGI */},
@@ -1700,7 +1697,7 @@ impl LogicSequence {
             ActionOperation::LoadPic((_var,)) => {/* NO-OP-RAGI */},
             ActionOperation::LoadLogic((_num,)) => {/* NO-OP-RAGI */},
             ActionOperation::LoadSound((_num,)) => {/* NO-OP-RAGI */},
-            ActionOperation::DiscardPic((var,)) => {/* NO-OP-RAGI */},
+            ActionOperation::DiscardPic((_var,)) => {/* NO-OP-RAGI */},
 
             // Everything else
             ActionOperation::If((condition,goto_if_false)) => if !Self::evaluate_condition(state,condition) { return Some(pc.jump(self,goto_if_false)); },
@@ -1801,10 +1798,10 @@ impl LogicSequence {
                 let s = state.get_string(s).trim().to_ascii_lowercase();
                 let mut words:Vec<u16>=Vec::new();
                 let mut ok=true;
-                for (index,w) in s.split(" ").enumerate() {
+                for (index,w) in s.split(' ').enumerate() {
                     let t = w.trim();
-                    if t.len()>0 {
-                        match resources.words.get(&t) {
+                    if !t.is_empty() {
+                        match resources.words.get(t) {
                             None => { state.set_var(&TypeVar::from(9), index as u8); ok=false; break; },    // might want to be 1's based?
                             Some(0u16) => {},
                             Some(b) => words.push(*b),
@@ -1822,7 +1819,7 @@ impl LogicSequence {
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
 
-        return Some(pc.next());
+        Some(pc.next())
     }
  
     pub fn render_glyph(resources:&GameResources,state:&mut LogicState,x:u16,y:u8,g:u8) {
@@ -1840,7 +1837,7 @@ impl LogicSequence {
                     state.back_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = 0;
                     state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = 0;
                 }
-                bits=bits<<1;
+                bits<<=1;
             }
         }
     }
@@ -1854,8 +1851,8 @@ impl LogicSequence {
         }
     }
 
-    pub fn interpret_instructions(&self,resources:&GameResources,state:&mut LogicState,pc:&LogicExecutionPosition,actions:&Vec<LogicOperation>) -> Option<LogicExecutionPosition> {
-        return self.interpret_instruction(resources, state, pc, &actions[pc.program_counter].action);
+    pub fn interpret_instructions(&self,resources:&GameResources,state:&mut LogicState,pc:&LogicExecutionPosition,actions:&[LogicOperation]) -> Option<LogicExecutionPosition> {
+        self.interpret_instruction(resources, state, pc, &actions[pc.program_counter].action)
     }
 
 }
@@ -1869,37 +1866,37 @@ pub struct LogicExecutionPosition {
 
 impl LogicExecutionPosition {
     pub fn new(file:usize,pc:usize) -> LogicExecutionPosition {
-        return LogicExecutionPosition { logic_file: file, program_counter: pc, user_input_request: false };
+        LogicExecutionPosition { logic_file: file, program_counter: pc, user_input_request: false }
     }
 
     pub fn user_input(&self) -> LogicExecutionPosition {
         // will cause the interpretter to stop and return back to this location after a render tick
-        return LogicExecutionPosition { logic_file: self.logic_file, program_counter: self.program_counter, user_input_request: true };
+        LogicExecutionPosition { logic_file: self.logic_file, program_counter: self.program_counter, user_input_request: true }
     }
 
     pub fn next(&self) -> LogicExecutionPosition {
-        return LogicExecutionPosition { logic_file: self.logic_file, program_counter: self.program_counter+1, user_input_request: false };
+        LogicExecutionPosition { logic_file: self.logic_file, program_counter: self.program_counter+1, user_input_request: false }
     }
 
     pub fn jump(&self, sequence:&LogicSequence, goto:&TypeGoto) -> LogicExecutionPosition {
-        return LogicExecutionPosition { logic_file: self.logic_file, program_counter: sequence.lookup_offset(goto).unwrap(), user_input_request: false }
+        LogicExecutionPosition { logic_file: self.logic_file, program_counter: sequence.lookup_offset(goto).unwrap(), user_input_request: false }
     }
 
     pub fn is_call(&self,logic_file:usize) -> bool {
-        return self.logic_file!=logic_file;
+        self.logic_file!=logic_file
     }
 
     pub fn is_input_request(&self) -> bool {
-        return self.user_input_request;
+        self.user_input_request
     }
 
     pub fn get_logic(&self) -> usize {
-        return self.logic_file;
+        self.logic_file
     }
 }
 
 //sprite stuff
-pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
+pub fn update_sprites(_resources:&GameResources,state:&mut LogicState) {
     // Handle direction updates/move logic?
 
     for (num,obj) in state.active_objects() {
@@ -1939,7 +1936,7 @@ pub fn fetch_priority_for_pixel(state:&LogicState,x:usize,y:usize) -> u8 {
     if pri<4 {
         return 15;  // bottom of screen
     }
-    return pri;
+    pri
 }
 
 pub fn render_sprites(resources:&GameResources,state:&mut LogicState) {
@@ -1966,27 +1963,20 @@ pub fn render_sprites(resources:&GameResources,state:&mut LogicState) {
             if obj.reverse {
                 if c > 0 {
                     state.mut_object(&obj_num).set_cel(obj.cel.wrapping_sub(1));
+                } else if obj.cycle {
+                    state.mut_object(&obj_num).set_cel((cels.len()-1) as u8);
                 } else {
-                    if obj.cycle {
-                        state.mut_object(&obj_num).set_cel((cels.len()-1) as u8);
-                    } else {
-                        state.set_flag(&obj.one_shot_flag,true);
-                        state.mut_object(&obj_num).clear_one_shot();
-                    }
+                    state.set_flag(&obj.one_shot_flag,true);
+                    state.mut_object(&obj_num).clear_one_shot();
                 }
+            } else if cels.len()-1 > c {
+                state.mut_object(&obj_num).set_cel(obj.cel.wrapping_add(1));
+            } else if obj.cycle {
+                state.mut_object(&obj_num).set_cel(0);
             } else {
-                if cels.len()-1 > c {
-                    state.mut_object(&obj_num).set_cel(obj.cel.wrapping_add(1));
-                } else {
-                    if obj.cycle {
-                        state.mut_object(&obj_num).set_cel(0);
-                    } else {
-                        state.set_flag(&obj.one_shot_flag,true);
-                        state.mut_object(&obj_num).clear_one_shot();
-                    }
-                }
+                state.set_flag(&obj.one_shot_flag,true);
+                state.mut_object(&obj_num).clear_one_shot();
             }
-
         }
     }
 

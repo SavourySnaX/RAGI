@@ -122,11 +122,11 @@ impl ResourceDirectory {
                 return Err("Input bytes are not made up of triples (size % 3 != 0)");
             }
         }
-        return Ok(ResourceDirectory{entries});
+        Ok(ResourceDirectory{entries})
     }
 
-    pub fn get<'a>(&'a self,index: usize) -> Option<&'a ResourceDirectoryEntry> {
-        return self.entries.get(index);
+    pub fn get(&self,index: usize) -> Option<&ResourceDirectoryEntry> {
+        self.entries.get(index)
     }
 
 

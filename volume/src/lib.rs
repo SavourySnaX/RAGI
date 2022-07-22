@@ -7,7 +7,7 @@ pub struct Volume {
 
 impl Volume {
     pub fn new(bytes: impl Iterator<Item = u8>) -> Result<Volume,&'static str> {
-        return Ok(Volume {data:bytes.collect()});
+        Ok(Volume {data:bytes.collect()})
     }
     
     pub fn fetch_data_slice<'a>(&'a self, entry: &ResourceDirectoryEntry) -> Result<&'a [u8],&'static str> {

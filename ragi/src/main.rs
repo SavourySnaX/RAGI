@@ -5,7 +5,7 @@ use logic::{LogicResource, LogicSequence, LogicState, LogicExecutionPosition, Ty
 
 use sdl2::pixels::Color;
 use sdl2::event::Event;
-use sdl2::keyboard::{Keycode, Scancode};
+use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
 
 use std::collections::HashMap;
@@ -85,11 +85,11 @@ struct Interpretter {
 impl Interpretter {
     pub fn new(base_path:&'static str) -> Result<Interpretter,String> {
         let resources = GameResources::new(base_path)?;
-        return Ok(Interpretter {
+        Ok(Interpretter {
             resources,
             state: LogicState::new(),
             stack: Vec::new(),
-        });
+        })
     }
 
     pub fn do_call(resources:&GameResources,stack:&mut Vec<LogicExecutionPosition>,state:&mut LogicState, logics:&HashMap<usize,LogicResource>) {
@@ -101,7 +101,7 @@ impl Interpretter {
             let actions = logic_sequence.get_operations();
             let mut exec = entry;
             loop {
-                match logic_sequence.interpret_instructions(resources,state,&exec,&actions) {
+                match logic_sequence.interpret_instructions(resources,state,&exec,actions) {
                     Some(newpc) => {
                         if newpc.is_input_request() {
                             stack[stack_pos]=newpc;
