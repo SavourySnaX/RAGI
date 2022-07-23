@@ -6,21 +6,44 @@ use helpers::{Root, double_pic_width};
 use objects::Objects;
 use picture::*;
 use rand::{Rng, prelude::ThreadRng};
-use view::ViewResource;
+use view::{ViewResource, ViewCel};
 use volume::Volume;
 use words::Words;
 
 use strum_macros::IntoStaticStr;
 
+pub const OBJECT_EGO:TypeObject = type_object_from_u8(0);
+
+pub const VAR_CURRENT_ROOM:TypeVar = type_var_from_u8(0);
+pub const VAR_PREVIOUS_ROOM:TypeVar = type_var_from_u8(1);
+pub const VAR_EGO_EDGE:TypeVar = type_var_from_u8(2);
+pub const VAR_CURRENT_SCORE:TypeVar = type_var_from_u8(3);
+pub const VAR_OBJ_TOUCHED_BORDER:TypeVar = type_var_from_u8(4);
+pub const VAR_OBJ_EDGE:TypeVar = type_var_from_u8(5);
+
+pub const VAR_MISSING_WORD:TypeVar = type_var_from_u8(9);
+
+pub const VAR_EGO_VIEW:TypeVar = type_var_from_u8(16);
+
+pub const FLAG_COMMAND_ENTERED:TypeFlag = type_flag_from_u8(2);
+
+pub const FLAG_SAID_ACCEPTED_INPUT:TypeFlag = type_flag_from_u8(4);
+pub const FLAG_ROOM_FIRST_TIME:TypeFlag = type_flag_from_u8(5);
+pub const FLAG_RESTART_GAME:TypeFlag = type_flag_from_u8(6);
+
+pub const FLAG_RESTORE_GAME:TypeFlag = type_flag_from_u8(12);
 
 type FP16=FixedU16<U8>;
 type FP32=FixedI32<U8>;
 
 #[derive(Debug,Copy,Clone)] // TODO revisit copy
 pub struct Sprite {
-    active:bool,
+    active:bool,    // object is processed
+    frozen:bool,    // object ignores updates (animation/etc)
     visible:bool,   // draw to screen (draw/erase, to confirm if this is automated (sprite), or blit)
-    observing:bool, // treats other objects as obsticles
+    observing:bool,         // treats other objects as obstacles
+    ignore_barriers:bool,   // ignores pixels of priority and block set with block_command
+    ignore_horizon:bool,    // ignores horizon position during movement
     cycle:bool,     // cycle loop automatically
     one_shot:bool,  // runs until end of current loop, and triggers flag
     reverse:bool,   // reverses the order of animation 
@@ -48,8 +71,11 @@ impl Sprite {
     pub fn new() -> Sprite {
         Sprite { 
             active: false, 
+            frozen: false,
             visible: false,
             observing: false, 
+            ignore_barriers: false,
+            ignore_horizon: false,
             cycle: false, 
             one_shot: false,
             reverse: false,
@@ -76,6 +102,18 @@ impl Sprite {
         self.y.to_num()
     }
 
+    pub fn get_view(&self) -> u8 {
+        self.view
+    }
+
+    pub fn get_loop(&self) -> u8 {
+        self.cloop
+    }
+
+    pub fn get_cel(&self) -> u8 {
+        self.cel
+    }
+
     pub fn get_x_fp16(&self) -> FP16 {
         self.x
     }
@@ -95,7 +133,7 @@ impl Sprite {
     pub fn get_end_y(&self) -> FP16 {
         self.ey
     }
-
+    
     pub fn get_priority(&self) -> u8 {
         if self.priority == 0 {
             // Automatic priority
@@ -123,6 +161,10 @@ impl Sprite {
         self.active=b;
     }
     
+    pub fn set_frozen(&mut self,b:bool) {
+        self.frozen=b;
+    }
+
     pub fn set_visible(&mut self,b:bool) {
         self.visible=b;
     }
@@ -135,6 +177,18 @@ impl Sprite {
 
     pub fn set_observing(&mut self,b:bool) {
         self.observing=b;
+    }
+
+    pub fn set_ignore_barriers(&mut self,b:bool) {
+        self.ignore_barriers=b;
+    }
+
+    pub fn set_ignore_horizon(&mut self,b:bool) {
+        self.ignore_horizon=b;
+    }
+
+    pub fn set_step_size(&mut self,s:u8) {
+        self.step_size=FP16::from_bits((s as u16)<<6);
     }
 
     pub fn set_cycling(&mut self,b:bool) {
@@ -297,6 +351,8 @@ pub struct LogicState {
     new_room:u8,
     text_mode:bool,
     input:bool,
+    ego_player_control:bool,
+    status_visible:bool,
     horizon:u8,
     flag:[bool;256],
     var:[u8;256],
@@ -336,6 +392,8 @@ impl LogicState {
             new_room: 0,
             text_mode:false,
             input: false,
+            ego_player_control: false,
+            status_visible: false,
             horizon: 0,
             flag: [false;256],
             var: [0u8;256],
@@ -420,6 +478,14 @@ impl LogicState {
         self.new_room = 0;
     }
 
+    pub fn set_player_control(&mut self) {
+        self.ego_player_control=true;
+    }
+    
+    pub fn set_program_control(&mut self) {
+        self.ego_player_control=false;
+    }
+
     pub fn set_new_room(&mut self,r:u8) {
         self.new_room = r;
     }
@@ -429,6 +495,10 @@ impl LogicState {
         if b {
             self.text_buffer = [0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
         }
+    }
+
+    pub fn set_status_visible(&mut self,b:bool) {
+        self.status_visible=b;
     }
 
     pub fn object(&self,o:&TypeObject) -> &Sprite {
@@ -479,14 +549,18 @@ impl LogicState {
 impl fmt::Debug for LogicState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LogicState")
-         .field("new_room", &self.new_room)
-         .field("input", &self.input)
-         .field("horizon", &self.horizon)
-         .field("flag", &self.flag)
-         .field("var", &self.var)
-         .field("objects", &self.objects)
-         .field("string", &self.string)
-         .finish()
+        .field("new_room", &self.new_room)
+        .field("input", &self.input)
+        .field("ego_player_control", &self.ego_player_control)
+        .field("status_visible",&self.status_visible)
+        .field("horizon", &self.horizon)
+        .field("flag", &self.flag)
+        .field("var", &self.var)
+        .field("objects", &self.objects)
+        .field("string", &self.string)
+        .field("text_mode",&self.text_mode)
+        .field("key_buffer",&self.key_buffer)
+        .finish()
     }
 }
 
@@ -541,6 +615,19 @@ impl From<u8> for name {
         name {value}
     }
 }
+
+const fn type_var_from_u8(n:u8) -> TypeVar {
+    TypeVar {value:n }
+}
+
+const fn type_object_from_u8(n:u8) -> TypeObject {
+    TypeObject {value:n }
+}
+
+const fn type_flag_from_u8(n:u8) -> TypeFlag {
+    TypeFlag {value:n }
+}
+
 
 impl From<u16> for TypeWord {
     fn from(value: u16) -> Self {
@@ -1609,7 +1696,7 @@ impl LogicSequence {
         self.labels.get(goto).map(|b| b.operation_offset)
     }
 
-    fn evaluate_condition_operation(state:&LogicState,op:&ConditionOperation) -> bool {
+    fn evaluate_condition_operation(resources:&GameResources,state:&LogicState,op:&ConditionOperation) -> bool {
         match op {
             ConditionOperation::EqualN((var,num)) => state.get_var(var) == state.get_num(num),
             ConditionOperation::EqualV((var1,var2)) => state.get_var(var1) == state.get_var(var2),
@@ -1620,34 +1707,34 @@ impl LogicSequence {
             ConditionOperation::IsSet((flag,)) => state.get_flag(flag),
             ConditionOperation::IsSetV(_) => todo!(),
             ConditionOperation::Has(_) =>  /* TODO */ false,
-            ConditionOperation::PosN(_) => todo!(),
+            ConditionOperation::PosN((obj,num1,num2,num3,num4)) => is_left_edge_in_box(resources,state,obj,num1,num2,num3,num4),
             ConditionOperation::Controller(_) => /* TODO */ false,
             ConditionOperation::HaveKey(_) => state.key_len>0,
             ConditionOperation::Said(_) => /* TODO */ false,
-            ConditionOperation::ObjInBox(_) => todo!(),
+            ConditionOperation::ObjInBox((obj,num1,num2,num3,num4)) => is_left_and_right_edge_in_box(resources,state,obj,num1, num2,num3,num4),
             ConditionOperation::RightPosN(_) => todo!(),
         }
     }
 
-    fn evaluate_condition_or(state:&LogicState,cond:&Vec<LogicChange>) -> bool {
+    fn evaluate_condition_or(resources:&GameResources,state:&LogicState,cond:&Vec<LogicChange>) -> bool {
         let mut result = false;
         for a in cond {
             result |= match a {
-                LogicChange::Normal((op,)) => Self::evaluate_condition_operation(state,op),
-                LogicChange::Not((op,)) => !Self::evaluate_condition_operation(state,op),
+                LogicChange::Normal((op,)) => Self::evaluate_condition_operation(resources,state,op),
+                LogicChange::Not((op,)) => !Self::evaluate_condition_operation(resources,state,op),
                 _ => panic!("Should not occur i think {:?}", a),
             };
         }
         result
     }
 
-    fn evaluate_condition(state:&LogicState,cond:&Vec<LogicChange>) -> bool {
+    fn evaluate_condition(resources:&GameResources,state:&LogicState,cond:&Vec<LogicChange>) -> bool {
         let mut result = true;
         for a in cond {
             result &= match a {
-                LogicChange::Normal((op,)) => Self::evaluate_condition_operation(state,op),
-                LogicChange::Not((op,)) => !Self::evaluate_condition_operation(state,op),
-                LogicChange::Or((or_block,)) => Self::evaluate_condition_or(state, or_block),
+                LogicChange::Normal((op,)) => Self::evaluate_condition_operation(resources,state,op),
+                LogicChange::Not((op,)) => !Self::evaluate_condition_operation(resources,state,op),
+                LogicChange::Or((or_block,)) => Self::evaluate_condition_or(resources,state, or_block),
             };
             if !result {  // Early out evaluation
                 break;
@@ -1667,16 +1754,16 @@ impl LogicSequence {
         //player.control()
         //unblock()
         state.set_horizon(36);
-        state.set_var(&TypeVar::from(1),state.get_var(&TypeVar::from(0)));
-        state.set_var(&TypeVar::from(0), room);
-        state.set_var(&TypeVar::from(4),0);
-        state.set_var(&TypeVar::from(5),0);
-        state.set_var(&TypeVar::from(9),0);
-        state.set_var(&TypeVar::from(16),0);    // Should be ego view num
-        //ego coords from var 2
-        state.set_var(&TypeVar::from(2),0);
-        state.set_flag(&TypeFlag::from(2),false);
-        state.set_flag(&TypeFlag::from(5),true);
+        state.set_var(&VAR_PREVIOUS_ROOM,state.get_var(&VAR_CURRENT_ROOM));
+        state.set_var(&VAR_CURRENT_ROOM, room);
+        state.set_var(&VAR_OBJ_TOUCHED_BORDER,0);
+        state.set_var(&VAR_OBJ_EDGE,0);
+        state.set_var(&VAR_MISSING_WORD,0);
+        state.set_var(&VAR_EGO_VIEW,state.object(&OBJECT_EGO).get_view());
+        //ego coords from var 2 (place ego based on last room basically)
+        state.set_var(&VAR_EGO_EDGE,0);
+        state.set_flag(&FLAG_COMMAND_ENTERED,false);
+        state.set_flag(&FLAG_ROOM_FIRST_TIME,true);
         // score<- var 3
     }
 
@@ -1700,7 +1787,7 @@ impl LogicSequence {
             ActionOperation::DiscardPic((_var,)) => {/* NO-OP-RAGI */},
 
             // Everything else
-            ActionOperation::If((condition,goto_if_false)) => if !Self::evaluate_condition(state,condition) { return Some(pc.jump(self,goto_if_false)); },
+            ActionOperation::If((condition,goto_if_false)) => if !Self::evaluate_condition(resources,state,condition) { return Some(pc.jump(self,goto_if_false)); },
             ActionOperation::Goto((goto,)) => return Some(pc.jump(self, goto)),
             ActionOperation::Return(()) => return None,
             ActionOperation::Call((num,)) => return Some(LogicExecutionPosition {logic_file:state.get_num(num) as usize, program_counter: 0, user_input_request: false}),
@@ -1802,7 +1889,7 @@ impl LogicSequence {
                     let t = w.trim();
                     if !t.is_empty() {
                         match resources.words.get(t) {
-                            None => { state.set_var(&TypeVar::from(9), index as u8); ok=false; break; },    // might want to be 1's based?
+                            None => { state.set_var(&VAR_MISSING_WORD, index as u8); ok=false; break; },    // might want to be 1's based?
                             Some(0u16) => {},
                             Some(b) => words.push(*b),
                         }
@@ -1810,11 +1897,22 @@ impl LogicSequence {
                 }
 
                 if ok {
-                    state.set_flag(&TypeFlag::from(2),true);
-                    state.set_flag(&TypeFlag::from(4),false);   //?
+                    state.set_flag(&FLAG_COMMAND_ENTERED,true);
+                    state.set_flag(&FLAG_SAID_ACCEPTED_INPUT,false);
                 }
             }
             ActionOperation::SetCursorChar((m,)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; state.set_prompt(m.chars().next().unwrap()); },
+            ActionOperation::IgnoreObjs((obj,)) => state.mut_object(obj).set_observing(false),
+            ActionOperation::IgnoreBlocks((obj,)) => state.mut_object(obj).set_ignore_barriers(true),
+            ActionOperation::StepSize((obj,var)) => {let s=state.get_var(var); state.mut_object(obj).set_step_size(s); },
+            ActionOperation::IgnoreHorizon((obj,)) => state.mut_object(obj).set_ignore_horizon(true),
+            ActionOperation::StopUpdate((obj,)) => state.mut_object(obj).set_frozen(true),
+            ActionOperation::ProgramControl(()) => state.set_program_control(),
+            ActionOperation::ObserveBlocks((obj,)) => state.mut_object(obj).set_ignore_barriers(false),
+            ActionOperation::Graphics(()) => state.set_text_mode(false),
+            ActionOperation::StatusLineOn(()) => state.set_status_visible(true),
+            ActionOperation::AcceptInput(()) => state.set_input(true),
+            ActionOperation::StartCycling((obj,)) => state.mut_object(obj).set_cycling(true),
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
@@ -1938,18 +2036,68 @@ pub fn fetch_priority_for_pixel(state:&LogicState,x:usize,y:usize) -> u8 {
     }
     pri
 }
+//
+// x1,y1
+//  |
+//  +---- x2,y2
+pub fn is_left_edge_in_box(_resources:&GameResources,state:&LogicState,obj:&TypeObject,x1:&TypeNum,y1:&TypeNum,x2:&TypeNum,y2:&TypeNum) -> bool {
+    let obj = state.object(obj);
+    let x1=state.get_num(x1);
+    let y1=state.get_num(y1);
+    let x2=state.get_num(x2);
+    let y2=state.get_num(y2);
+    let x=obj.get_x();
+    let y=obj.get_y();
+    x>=x1 && x<=x2 && y>=y1 && y<=y2
+}
+
+pub fn is_center_edge_in_box(resources:&GameResources,state:&LogicState,obj:&TypeObject,x1:&TypeNum,y1:&TypeNum,x2:&TypeNum,y2:&TypeNum) -> bool {
+    let obj = state.object(obj);
+    let c = usize::from(obj.get_cel());
+    let cels = get_cells(resources, obj);
+    let cell = &cels[c];
+    let x1=state.get_num(x1);
+    let y1=state.get_num(y1);
+    let x2=state.get_num(x2);
+    let y2=state.get_num(y2);
+    let x=obj.get_x() + cell.get_width()/2;
+    let y=obj.get_y();
+    x>=x1 && x<=x2 && y>=y1 && y<=y2
+}
+
+pub fn is_right_edge_in_box(resources:&GameResources,state:&LogicState,obj:&TypeObject,x1:&TypeNum,y1:&TypeNum,x2:&TypeNum,y2:&TypeNum) -> bool {
+    let obj = state.object(obj);
+    let c = usize::from(obj.get_cel());
+    let cels = get_cells(resources, obj);
+    let cell = &cels[c];
+    let x1=state.get_num(x1);
+    let y1=state.get_num(y1);
+    let x2=state.get_num(x2);
+    let y2=state.get_num(y2);
+    let x=obj.get_x() + cell.get_width()-1;
+    let y=obj.get_y();
+    x>=x1 && x<=x2 && y>=y1 && y<=y2
+}
+
+pub fn is_left_and_right_edge_in_box(resources:&GameResources,state:&LogicState,obj:&TypeObject,x1:&TypeNum,y1:&TypeNum,x2:&TypeNum,y2:&TypeNum) -> bool {
+    is_left_edge_in_box(resources,state,obj,x1,y1,x2,y2) && is_right_edge_in_box(resources,state,obj,x1,y1,x2,y2)
+}
+
+pub fn get_cells<'a>(resources:&'a GameResources,obj:&Sprite) -> &'a Vec<ViewCel> {
+    let v = usize::from(obj.get_view());
+    let l = usize::from(obj.get_loop());
+    let view = &resources.views[&v];
+    let loops = view.get_loops();
+    let cloop = &loops[l];
+    cloop.get_cels()
+}
 
 pub fn render_sprites(resources:&GameResources,state:&mut LogicState) {
     state.post_sprites = state.back_buffer;
 
     for (num,obj) in state.active_objects() {
-        let v = usize::from(obj.view);
-        let l = usize::from(obj.cloop);
-        let c = usize::from(obj.cel);
-        let view = &resources.views[&v];
-        let loops = view.get_loops();
-        let cloop = &loops[l];
-        let cels = cloop.get_cels();
+        let c = usize::from(obj.get_cel());
+        let cels = get_cells(resources, &obj);
         let cell = &cels[c];
 
         if obj.visible {

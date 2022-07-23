@@ -1,6 +1,6 @@
 
 use helpers::conv_rgba;
-use logic::{LogicResource, LogicSequence, LogicState, LogicExecutionPosition, TypeFlag, GameResources, TypeVar, render_sprites, update_sprites};
+use logic::{LogicResource, LogicSequence, LogicState, LogicExecutionPosition, GameResources, render_sprites, update_sprites, VAR_OBJ_TOUCHED_BORDER, VAR_OBJ_EDGE, FLAG_SAID_ACCEPTED_INPUT, FLAG_COMMAND_ENTERED, FLAG_ROOM_FIRST_TIME, FLAG_RESTART_GAME, FLAG_RESTORE_GAME};
 
 
 use sdl2::pixels::Color;
@@ -80,6 +80,7 @@ struct Interpretter {
     resources:GameResources,
     state:LogicState,
     stack:Vec<LogicExecutionPosition>,
+    keys:Vec<Keycode>,
 }
 
 impl Interpretter {
@@ -89,6 +90,7 @@ impl Interpretter {
             resources,
             state: LogicState::new(),
             stack: Vec::new(),
+            keys: Vec::new(),
         })
     }
 
@@ -132,17 +134,11 @@ impl Interpretter {
     }
 
     pub fn key_code_pressed(&mut self,key_code:Keycode) {
-        let mutable_state = &mut self.state;
-
-        if (key_code as u32) <256 {
-            mutable_state.key_pressed(key_code as u8);
-        }
+        self.keys.push(key_code);
     }
     
     pub fn clear_keys(&mut self) {
-        let mutable_state = &mut self.state;
-
-        mutable_state.clear_keys();
+        self.keys.clear();
     }
 
     pub fn run(&mut self) {
@@ -151,13 +147,20 @@ impl Interpretter {
         let mutable_state = &mut self.state;
         let mutable_stack = &mut self.stack;
 
-        if !resuming {
-            // delay
-            // clear keybuffer
+        // delay
+        // clear keybuffer
+        mutable_state.clear_keys();
 
-            mutable_state.set_flag(&TypeFlag::from(2), false);
-            mutable_state.set_flag(&TypeFlag::from(4), false);
-            // poll keyb/joystick
+        mutable_state.set_flag(&FLAG_COMMAND_ENTERED, false);
+        mutable_state.set_flag(&FLAG_SAID_ACCEPTED_INPUT, false);
+        // poll keyb/joystick
+        for k in &self.keys {
+            if (*k as u32) <256 {
+                mutable_state.key_pressed(*k as u8);
+            }
+        }
+
+        if !resuming {
             // if program.control (EGO dir = var(6))
             // if player.control (var(6) = EGO dir)
             // For all objects wich animate.obj,start_update and draw
@@ -182,11 +185,11 @@ impl Interpretter {
             }
 
             // dir of EGO <- var(6)
-            mutable_state.set_var(&TypeVar::from(5), 0);
-            mutable_state.set_var(&TypeVar::from(4), 0);
-            mutable_state.set_flag(&TypeFlag::from(5), false);
-            mutable_state.set_flag(&TypeFlag::from(6), false);
-            mutable_state.set_flag(&TypeFlag::from(12), false);
+            mutable_state.set_var(&VAR_OBJ_EDGE, 0);
+            mutable_state.set_var(&VAR_OBJ_TOUCHED_BORDER, 0);
+            mutable_state.set_flag(&FLAG_ROOM_FIRST_TIME, false);
+            mutable_state.set_flag(&FLAG_RESTART_GAME, false);
+            mutable_state.set_flag(&FLAG_RESTORE_GAME, false);
             // update all controlled objects on screen
             // if new room issued, rerun logic
             if mutable_state.get_new_room()!=0 {
