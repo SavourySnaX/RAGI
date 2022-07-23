@@ -1,14 +1,100 @@
 
+use glow::HasContext;
 use helpers::conv_rgba;
 use logic::{LogicResource, LogicSequence, LogicState, LogicExecutionPosition, GameResources, render_sprites, update_sprites, VAR_OBJ_TOUCHED_BORDER, VAR_OBJ_EDGE, FLAG_SAID_ACCEPTED_INPUT, FLAG_COMMAND_ENTERED, FLAG_ROOM_FIRST_TIME, FLAG_RESTART_GAME, FLAG_RESTORE_GAME};
 
 
-use sdl2::pixels::Color;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use sdl2::rect::Rect;
-
+use imgui::*;
 use std::collections::HashMap;
+use std::time::Duration;
+
+struct TexturesUi {
+    generated_texture: TextureId,
+    gl_texture: u32,
+}
+
+impl TexturesUi {
+    fn new(gl: &glow::Context, textures: &mut Textures<glow::Texture>) -> Self {
+        let (generated_texture,gl_texture) = Self::generate(gl, textures);
+        Self {
+            generated_texture,gl_texture
+        }
+    }
+
+    fn get_generated_texture(&self) -> TextureId {
+        self.generated_texture
+    }
+
+    pub fn update(&self,gl:&glow::Context, data:&[u8]) {
+        const WIDTH: usize = 320;
+        const HEIGHT: usize = 200;
+        unsafe {
+            gl.bind_texture(glow::TEXTURE_2D, Some(self.gl_texture));
+            gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                glow::RGB as _, // When generating a texture like this, you're probably working in linear color space
+                WIDTH as _,
+                HEIGHT as _,
+                0,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                Some(data),
+            )
+        }
+    }
+
+    /// Generate dummy texture
+    fn generate(
+        gl: &glow::Context,
+        textures: &mut Textures<glow::Texture>,
+    ) -> (TextureId,u32) {
+        const WIDTH: usize = 320;
+        const HEIGHT: usize = 200;
+
+        let mut data = Vec::with_capacity(WIDTH * HEIGHT);
+        for i in 0..WIDTH {
+            for j in 0..HEIGHT {
+                // Insert RGB values
+                data.push(i as u8);
+                data.push(j as u8);
+                data.push((i + j) as u8);
+                data.push(255u8);
+            }
+        }
+
+        let gl_texture = unsafe { gl.create_texture() }.expect("unable to create GL texture");
+
+        unsafe {
+            gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture));
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MIN_FILTER,
+                glow::LINEAR as _,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MAG_FILTER,
+                glow::LINEAR as _,
+            );
+            gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                glow::RGB as _, // When generating a texture like this, you're probably working in linear color space
+                WIDTH as _,
+                HEIGHT as _,
+                0,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                Some(&data),
+            )
+        }
+
+        (textures.insert(gl_texture),gl_texture)
+    }
+}
 
 fn main() -> Result<(), String> {
 
@@ -17,27 +103,43 @@ fn main() -> Result<(), String> {
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
 
-    let window = video_subsystem.window("R.A.G.I", 640, 400)
+    let gl_attr = video_subsystem.gl_attr();
+    gl_attr.set_context_version(3, 3);
+    gl_attr.set_context_profile(sdl2::video::GLProfile::Core);
+
+    let window = video_subsystem.window("R.A.G.I", 640*2, 400*2)
         .position_centered()
+        .resizable()
+        .opengl()
+        .allow_highdpi()
         .build()
         .expect("could not initialize video subsystem");
 
-    let mut canvas = window.into_canvas().build()
-        .expect("could not make a canvas");
+    let _gl_context = window.gl_create_context().expect("Couldn't create GL context");
 
-    canvas.set_draw_color(Color::RGB(0, 255, 255));
-    canvas.clear();
-    canvas.present();
+    let gl = unsafe {glow::Context::from_loader_function(|s| video_subsystem.gl_get_proc_address(s) as *const _)};
+
+    let mut imgui = Context::create();
+    let mut imgui_sdl2 = imgui_sdl2::ImguiSdl2::new(&mut imgui,&window);
+
+    let mut textures = Textures::<glow::Texture>::default();
+
+    let mut renderer = imgui_glow_renderer::Renderer::initialize(&gl,&mut imgui,&mut textures, true)
+        .expect("failed to create renderer");
     let mut event_pump = sdl_context.event_pump()?;
 
-    let tex_creator = canvas.texture_creator();
-    let mut foreground = tex_creator.create_texture(sdl2::pixels::PixelFormatEnum::ABGR8888, sdl2::render::TextureAccess::Streaming, 320, 200).unwrap();
+    let textures_ui = TexturesUi::new(&gl,&mut textures);
 
     'running: loop {
-        canvas.set_draw_color(Color::RGB(0, 0, 0));
-        canvas.clear();
+        unsafe {
+            gl.clear_color(0.0,0.3,0.3,1.0);
+            gl.clear(glow::COLOR_BUFFER_BIT);
+        }
+        
         interpretter.clear_keys();
         for event in event_pump.poll_iter() {
+            imgui_sdl2.handle_event(&mut imgui, &event);
+            if imgui_sdl2.ignore_event(&event) { continue; }
             match event {
                 Event::Quit {..} |
                 Event::KeyDown { keycode: Some(Keycode::F12), .. } => {
@@ -50,27 +152,29 @@ fn main() -> Result<(), String> {
             }
         }
 
+        imgui_sdl2.prepare_frame(imgui.io_mut(), &window, &event_pump.mouse_state());
+
         // The rest of the game loop goes here...
         interpretter.run();
 
-        // Update our texture from our back buffer
+        // imgui windows etc
         let pic = conv_rgba(interpretter.state.final_buffer());
 
-        let mut vec:Vec<u8> = vec![0u8;320*200*4];//Vec::new();
-        for y in 0usize..200 {
-            for x in 0usize..320 {
-                for n in 0..4 {
-                    vec[(x+y*320)*4+n]=pic[(x+y*320)*4+n];
-                }
-            }
-        }
+        textures_ui.update(&gl,&pic);
+        
+        let ui = imgui.frame();
+        Window::new("MAIN GAME").resizable(false)
+            .build(&ui, || {
+                Image::new(textures_ui.get_generated_texture(),[640.0,400.0]).build(&ui);
+            });
 
-        foreground.update(None, &vec[..], 320*4).unwrap();
+        imgui_sdl2.prepare_render(&ui,&window);
+        let draw_data = ui.render();
+        renderer.render(&gl,&textures,draw_data).expect("Renderer failed");
 
-        canvas.copy(&foreground, None, Rect::new(0,0,640,400)).unwrap();
+        window.gl_swap_window();
 
-        canvas.present();
-        //::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
+        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
     }
 
     Ok(())
