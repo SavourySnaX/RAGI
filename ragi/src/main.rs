@@ -163,10 +163,27 @@ fn main() -> Result<(), String> {
         textures_ui.update(&gl,&pic);
         
         let ui = imgui.frame();
-        Window::new("MAIN GAME").resizable(false)
-            .build(&ui, || {
-                Image::new(textures_ui.get_generated_texture(),[640.0,400.0]).build(&ui);
-            });
+
+        Window::new("MAIN GAME").resizable(false).build(&ui, || {
+            Image::new(textures_ui.get_generated_texture(),[640.0,400.0]).build(&ui);
+        });
+
+        Window::new("OBJECTS").build(&ui, || {
+            for (index,obj) in interpretter.state.active_objects() {
+                TreeNode::new(format!("Object {}",index)).flags(if obj.get_visible() {TreeNodeFlags::BULLET} else {TreeNodeFlags::OPEN_ON_ARROW}).build(&ui, || {
+                    ui.text_wrapped(format!("{:?}",obj));
+                });
+            }
+        });
+
+        Window::new("LOGIC").build(&ui, || {
+            let logic = interpretter.resources.logic.get(&0);
+            if !logic.is_none() {
+                for s in logic.unwrap().get_disassembly_iterator(&interpretter.resources.words, &interpretter.resources.objects) {
+                    ui.text(s);
+                }
+            }
+        });
 
         imgui_sdl2.prepare_render(&ui,&window);
         let draw_data = ui.render();
@@ -181,10 +198,10 @@ fn main() -> Result<(), String> {
 }
 
 struct Interpretter {
-    resources:GameResources,
-    state:LogicState,
-    stack:Vec<LogicExecutionPosition>,
-    keys:Vec<Keycode>,
+    pub resources:GameResources,
+    pub state:LogicState,
+    pub stack:Vec<LogicExecutionPosition>,
+    pub keys:Vec<Keycode>,
 }
 
 impl Interpretter {
@@ -303,6 +320,6 @@ impl Interpretter {
             }
         }
 
-        render_sprites(&self.resources,mutable_state);
+        render_sprites(&self.resources,mutable_state,false);
     }
 }

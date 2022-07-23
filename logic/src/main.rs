@@ -21,8 +21,8 @@ impl<'a> Root<'_> {
 fn main() {
 
     //let root = Root::new("../images/Leisure Suit Larry in the Land of the Lounge Lizards (1987)(Sierra On-Line, Inc.) [Adventure]/");
-    //let root = Root::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/");
-    let root = Root::new("../images/GROZA/");
+    let root = Root::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/");
+    //let root = Root::new("../images/GROZA/");
 
     let bytes = fs::read(root.base_path.join("OBJECT").into_os_string()).unwrap_or_default();
 

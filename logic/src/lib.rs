@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash, ops, fmt, fs};
+use std::{collections::{HashMap, VecDeque}, hash::Hash, ops, fmt, fs};
 
 use dir_resource::{ResourceDirectoryEntry, ResourceDirectory};
 use fixed::{FixedU16, types::extra::U8, FixedI32};
@@ -97,7 +97,7 @@ impl Sprite {
     pub fn get_x(&self) -> u8 {
         self.x.to_num()
     }
-    
+
     pub fn get_y(&self) -> u8 {
         self.y.to_num()
     }
@@ -112,6 +112,10 @@ impl Sprite {
 
     pub fn get_cel(&self) -> u8 {
         self.cel
+    }
+
+    pub fn get_visible(&self) -> bool {
+        self.visible
     }
 
     pub fn get_x_fp16(&self) -> FP16 {
@@ -1208,6 +1212,49 @@ impl LogicResource {
             if let ActionOperation::If(_) = logic_operation.action { println!("{:indent$}{{","",indent=indent);indent+=2; }
         }
     }
+
+    pub fn get_disassembly_iterator<'a>(&'a self,words:&'a Words,items:&'a Objects) -> LogicResourceDisassemblyIterator {
+        LogicResourceDisassemblyIterator { logic_resource: &self, words, items, indent: 2, offs: 0, temp_string_vec:VecDeque::new() }
+    }
+}
+
+pub struct LogicResourceDisassemblyIterator<'a> {
+    logic_resource:&'a LogicResource,
+    words:&'a Words,
+    items:&'a Objects,
+    indent:usize,
+    offs:usize,
+    temp_string_vec:VecDeque<String>,
+}
+
+impl<'a> Iterator for LogicResourceDisassemblyIterator<'a> {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.temp_string_vec.is_empty() {
+            if self.offs >= self.logic_resource.get_logic_sequence().operations.len() {
+                return None;
+            }
+            let logic_operation = &self.logic_resource.get_logic_sequence().operations[self.offs];
+            if let Some(label) = self.logic_resource.get_logic_sequence().labels.get(&logic_operation.address) {
+                for _ in 0..label.if_destination_cnt {
+                    self.indent-=2;
+                    self.temp_string_vec.push_back(format!("{:indent$}}}","",indent=self.indent));
+                }
+                if label.is_goto_destination {
+                    self.temp_string_vec.push_back(format!("label_{}:",label.operation_offset));
+                } 
+            }
+
+            self.temp_string_vec.push_back(format!("{:indent$}{v}","",v=self.logic_resource.instruction_disassemble(&logic_operation.action,self.words,self.items),indent=self.indent));
+
+            if let ActionOperation::If(_) = logic_operation.action { self.temp_string_vec.push_back(format!("{:indent$}{{","",indent=self.indent)); self.indent+=2; }
+
+            self.offs+=1;
+        }
+        //Otherwise a string should have been pushed into the vec by above (unless we hit the none return)
+        Some(self.temp_string_vec.pop_front().unwrap())
+    }
 }
 
 impl LogicSequence {
@@ -1670,8 +1717,15 @@ impl LogicSequence {
 
                     if let std::collections::hash_map::Entry::Vacant(e) = labels.entry(destination) {
                         e.insert(Label { is_goto_destination:is_goto, if_destination_cnt: if !is_goto {1} else {0}, operation_offset:offsets[&destination]});
-                    } else if labels[&destination].operation_offset != offsets[&destination] {
-                        panic!("WUT!");
+                    } else {
+                        if labels[&destination].operation_offset != offsets[&destination] {
+                            panic!("WUT!");
+                        }
+                        if is_goto {
+                            labels.get_mut(&destination).unwrap().is_goto_destination=true;
+                        } else {
+                            labels.get_mut(&destination).unwrap().if_destination_cnt+=1;
+                        }
                     }
                 },
                 _ => {},
@@ -2092,8 +2146,8 @@ pub fn get_cells<'a>(resources:&'a GameResources,obj:&Sprite) -> &'a Vec<ViewCel
     cloop.get_cels()
 }
 
-pub fn render_sprites(resources:&GameResources,state:&mut LogicState) {
-    state.post_sprites = state.back_buffer;
+pub fn render_sprites(resources:&GameResources,state:&mut LogicState, disable_background:bool) {
+    state.post_sprites = if disable_background {[0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]} else {state.back_buffer};
 
     for (num,obj) in state.active_objects() {
         let c = usize::from(obj.get_cel());
