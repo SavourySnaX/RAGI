@@ -1,7 +1,7 @@
 
 use glow::HasContext;
-use helpers::conv_rgba;
-use logic::{LogicResource, LogicSequence, LogicState, LogicExecutionPosition, GameResources, render_sprites, update_sprites, VAR_OBJ_TOUCHED_BORDER, VAR_OBJ_EDGE, FLAG_SAID_ACCEPTED_INPUT, FLAG_COMMAND_ENTERED, FLAG_ROOM_FIRST_TIME, FLAG_RESTART_GAME, FLAG_RESTORE_GAME, VAR_CURRENT_ROOM};
+use helpers::{conv_rgba, double_pic_width, conv_rgba_transparent};
+use logic::{LogicResource, LogicSequence, LogicState, LogicExecutionPosition, GameResources, render_sprites, update_sprites, VAR_OBJ_TOUCHED_BORDER, VAR_OBJ_EDGE, FLAG_SAID_ACCEPTED_INPUT, FLAG_COMMAND_ENTERED, FLAG_ROOM_FIRST_TIME, FLAG_RESTART_GAME, FLAG_RESTORE_GAME, VAR_CURRENT_ROOM, get_cells};
 
 
 use sdl2::event::Event;
@@ -11,33 +11,39 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 struct TexturesUi {
-    generated_texture: TextureId,
-    gl_texture: u32,
+    generated_textures: Vec<TextureId>,
+    gl_textures: Vec<u32>,
 }
 
 impl TexturesUi {
-    fn new(gl: &glow::Context, textures: &mut Textures<glow::Texture>) -> Self {
-        let (generated_texture,gl_texture) = Self::generate(gl, textures);
+    fn new(gl: &glow::Context, textures: &mut Textures<glow::Texture>,num:usize) -> Self {
+        let mut generated_textures:Vec<TextureId> = Vec::new();
+        let mut gl_textures:Vec<u32> = Vec::new();
+        generated_textures.reserve(num);
+        gl_textures.reserve(num);
+        for _ in 0..num {
+            let (generated_texture,gl_texture) = Self::generate(gl, textures);
+            generated_textures.push(generated_texture);
+            gl_textures.push(gl_texture);
+        }
         Self {
-            generated_texture,gl_texture
+            generated_textures,gl_textures
         }
     }
 
-    fn get_generated_texture(&self) -> TextureId {
-        self.generated_texture
+    fn get_generated_texture(&self,index:usize) -> TextureId {
+        self.generated_textures[index]
     }
 
-    pub fn update(&self,gl:&glow::Context, data:&[u8]) {
-        const WIDTH: usize = 320;
-        const HEIGHT: usize = 200;
+    pub fn update(&self,gl:&glow::Context,index:usize, width:usize,height:usize,data:&[u8]) {
         unsafe {
-            gl.bind_texture(glow::TEXTURE_2D, Some(self.gl_texture));
+            gl.bind_texture(glow::TEXTURE_2D, Some(self.gl_textures[index]));
             gl.tex_image_2d(
                 glow::TEXTURE_2D,
                 0,
                 glow::RGB as _, // When generating a texture like this, you're probably working in linear color space
-                WIDTH as _,
-                HEIGHT as _,
+                width as _,
+                height as _,
                 0,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,
@@ -46,17 +52,14 @@ impl TexturesUi {
         }
     }
 
-    /// Generate dummy texture
+    /// Generate dummy 1x1 texture with sane settings - Will be overwritten by gui later
     fn generate(
         gl: &glow::Context,
         textures: &mut Textures<glow::Texture>,
     ) -> (TextureId,u32) {
-        const WIDTH: usize = 320;
-        const HEIGHT: usize = 200;
-
-        let mut data = Vec::with_capacity(WIDTH * HEIGHT);
-        for i in 0..WIDTH {
-            for j in 0..HEIGHT {
+        let mut data = Vec::with_capacity(1 * 1);
+        for i in 0..1 {
+            for j in 0..1 {
                 // Insert RGB values
                 data.push(i as u8);
                 data.push(j as u8);
@@ -72,19 +75,19 @@ impl TexturesUi {
             gl.tex_parameter_i32(
                 glow::TEXTURE_2D,
                 glow::TEXTURE_MIN_FILTER,
-                glow::LINEAR as _,
+                glow::NEAREST as _,
             );
             gl.tex_parameter_i32(
                 glow::TEXTURE_2D,
                 glow::TEXTURE_MAG_FILTER,
-                glow::LINEAR as _,
+                glow::NEAREST as _,
             );
             gl.tex_image_2d(
                 glow::TEXTURE_2D,
                 0,
                 glow::RGB as _, // When generating a texture like this, you're probably working in linear color space
-                WIDTH as _,
-                HEIGHT as _,
+                1 as _,
+                1 as _,
                 0,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,
@@ -98,8 +101,9 @@ impl TexturesUi {
 
 fn main() -> Result<(), String> {
 
-    //let mut interpretter=Interpretter::new("../images/Leisure Suit Larry in the Land of the Lounge Lizards (1987)(Sierra On-Line, Inc.) [Adventure]/").unwrap();
-    let mut interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/").unwrap();
+    let mut interpretter=Interpretter::new("../images/King's Quest v1.0U (1986)(Sierra On-Line, Inc.) [Adventure][!]/","2.272").unwrap();
+    //let mut interpretter=Interpretter::new("../images/Leisure Suit Larry in the Land of the Lounge Lizards (1987)(Sierra On-Line, Inc.) [Adventure]/").unwrap(); let version="2.440";
+    //let mut interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/").unwrap(); let version="2.089";
 
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -125,11 +129,11 @@ fn main() -> Result<(), String> {
 
     let mut textures = Textures::<glow::Texture>::default();
 
-    let mut renderer = imgui_glow_renderer::Renderer::initialize(&gl,&mut imgui,&mut textures, true)
+    let mut renderer = imgui_glow_renderer::Renderer::initialize(&gl,&mut imgui,&mut textures, false)
         .expect("failed to create renderer");
     let mut event_pump = sdl_context.event_pump()?;
 
-    let textures_ui = TexturesUi::new(&gl,&mut textures);
+    let textures_ui = TexturesUi::new(&gl,&mut textures,64);
 
     interpretter.breakpoints.insert(LogicExecutionPosition::new(2,0), false);
 
@@ -172,17 +176,27 @@ fn main() -> Result<(), String> {
         // imgui windows etc
         let pic = conv_rgba(interpretter.state.final_buffer());
 
-        textures_ui.update(&gl,&pic);
+        textures_ui.update(&gl,0, 320, 200, &pic);
         
         let ui = imgui.frame();
 
         Window::new("MAIN GAME").resizable(false).build(&ui, || {
-            Image::new(textures_ui.get_generated_texture(),[640.0,400.0]).build(&ui);
+            Image::new(textures_ui.get_generated_texture(0),[640.0,400.0]).build(&ui);
         });
 
         Window::new("OBJECTS").build(&ui, || {
             for (index,obj) in interpretter.state.active_objects() {
                 TreeNode::new(format!("Object {}",index)).flags(if obj.get_visible() {TreeNodeFlags::BULLET} else {TreeNodeFlags::OPEN_ON_ARROW}).build(&ui, || {
+                    let c = usize::from(obj.get_cel());
+                    let cels = get_cells(&interpretter.resources, &obj);
+                    let cell = &cels[c];
+                    let dbl = double_pic_width(cell.get_data());
+                    let rgb=conv_rgba_transparent(&dbl, cell.get_transparent_colour());
+                    let width = cell.get_width() as usize;
+                    let width = width * 2;
+                    let height = cell.get_height() as _;
+                    textures_ui.update(&gl, index+1, width, height, &rgb);
+                    Image::new(textures_ui.get_generated_texture(index+1),[width as f32,height as f32]).build(&ui);
                     ui.text_wrapped(format!("{:?}",obj));
                 });
             }
@@ -292,8 +306,8 @@ struct Interpretter {
 }
 
 impl Interpretter {
-    pub fn new(base_path:&'static str) -> Result<Interpretter,String> {
-        let resources = GameResources::new(base_path)?;
+    pub fn new(base_path:&'static str,version:&str) -> Result<Interpretter,String> {
+        let resources = GameResources::new(base_path,version)?;
         Ok(Interpretter {
             resources,
             state: LogicState::new(),

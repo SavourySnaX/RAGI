@@ -192,6 +192,7 @@ impl Sprite {
     }
 
     pub fn set_step_size(&mut self,s:u8) {
+        let s = if s==0 {1} else {s};   // Not Sure
         self.step_size=FP16::from_bits((s as u16)<<6);
     }
 
@@ -251,8 +252,8 @@ impl Sprite {
         self.move_obj=true;
         self.ex=FP16::from_num(x);
         self.ey=FP16::from_num(y);
-        self.step_size=FP16::from_bits((s as u16)<<6);
         self.move_flag= *f;
+        self.set_step_size(s)
     }
 
     pub fn clear_move(&mut self) {
@@ -285,7 +286,7 @@ pub struct GameResources
 }
 
 impl GameResources {
-    pub fn new (base_path:&'static str) -> Result<GameResources,String> {
+    pub fn new (base_path:&'static str,version:&str) -> Result<GameResources,String> {
 
         // hack for font
         let font = fs::read("../images/BM.PSF").unwrap();
@@ -334,7 +335,7 @@ impl GameResources {
                     let bytes = root.read_data_or_default(format!("VOL.{}", entry.volume).as_str());
                     e.insert(Volume::new(bytes.into_iter())?);
                 }
-                logic.insert(index, LogicResource::new(&volumes[&entry.volume],&entry)?);
+                logic.insert(index, LogicResource::new(&volumes[&entry.volume],&entry,version)?);
             }
         }
         logic.shrink_to_fit();
@@ -606,7 +607,7 @@ pub struct LogicSequence {
 }
 
 #[duplicate_item(name; [TypeFlag]; [TypeNum]; [TypeVar]; [TypeObject]; [TypeController]; [TypeMessage]; [TypeString]; [TypeItem])]
-#[derive(Clone,Copy,Debug)]
+#[derive(Clone,Copy,Debug,PartialEq)]
 #[allow(dead_code)]
 pub struct name {
     value:u8,
@@ -726,6 +727,7 @@ pub enum ActionOperation {
     LoadPic((TypeVar,)),
     DrawPic((TypeVar,)),
     ShowPic(()),
+    OverlayPic((TypeVar,)),
     DiscardPic((TypeVar,)),
     ShowPriScreen(()),
     LoadView((TypeNum,)),
@@ -830,7 +832,9 @@ pub enum ActionOperation {
     CancelLine(()),
     InitJoy(()),
     ToggleMonitor(()),
+    ScriptSize((TypeNum,)),
     Version(()),
+    Log((TypeMessage,)),
     SetGameID((TypeMessage,)),
     RepositionTo((TypeObject,TypeNum,TypeNum)),
     RepositionToV((TypeObject,TypeVar,TypeVar)),
@@ -917,7 +921,7 @@ impl LogicMessages {
 }
 
 impl LogicResource {
-    pub fn new(volume:&Volume, entry: &ResourceDirectoryEntry) -> Result<LogicResource, &'static str> {
+    pub fn new(volume:&Volume, entry: &ResourceDirectoryEntry, version:&str) -> Result<LogicResource, &'static str> {
 
         let slice = volume.fetch_data_slice(entry).expect("Expected to be able to fetch slice from entry");
         let mut slice_iter = slice.iter();
@@ -933,7 +937,7 @@ impl LogicResource {
         let text_slice = &slice[text_start+2..];
 
         let logic_messages = LogicMessages::new(text_slice).expect("Failed to ");
-        let logic_sequence = LogicSequence::new(logic_slice).expect("fsjkdfhksdjf");
+        let logic_sequence = LogicSequence::new(logic_slice,version).expect("fsjkdfhksdjf");
 
         Ok(LogicResource {logic_sequence, logic_messages})
     }
@@ -1091,6 +1095,7 @@ impl LogicResource {
             ActionOperation::LoadPic(a) |
             ActionOperation::DrawPic(a) |
             ActionOperation::DiscardPic(a) |
+            ActionOperation::OverlayPic(a) |
             ActionOperation::LoadViewV(a) |
             ActionOperation::GetV(a) |
             ActionOperation::PrintV(a) |
@@ -1104,6 +1109,7 @@ impl LogicResource {
             ActionOperation::LoadSound(a) |
             ActionOperation::ShakeScreen(a) |
             ActionOperation::ShowObj(a) |
+            ActionOperation::ScriptSize(a) |
             ActionOperation::QuitV1(a) => Self::param_dis_num(&a.0),
             ActionOperation::Set(a) |
             ActionOperation::Reset(a) |
@@ -1135,6 +1141,7 @@ impl LogicResource {
             ActionOperation::Drop(a) => Self::param_dis_item(&a.0, items),
             ActionOperation::Print(a) |
             ActionOperation::SetCursorChar(a) |
+            ActionOperation::Log(a) |
             ActionOperation::SetGameID(a) => self.param_dis_message(&a.0),
             ActionOperation::Parse(a) => Self::param_dis_string(&a.0),
             ActionOperation::SetTextAttribute(a) => format!("{},{}",Self::param_dis_num(&a.0),Self::param_dis_num(&a.1)),
@@ -1547,7 +1554,7 @@ impl LogicSequence {
         Ok((conditions,pos))
     }
 
-    fn new(logic_slice: &[u8]) -> Result<LogicSequence,&'static str> {
+    fn new(logic_slice: &[u8],version:&str) -> Result<LogicSequence,&'static str> {
 
         let mut iter = logic_slice.iter();
 
@@ -1569,11 +1576,13 @@ impl LogicSequence {
             let action = match b {
                 0xFF => ActionOperation::If(Self::parse_vlogic_change_goto(&mut iter)?),
                 0xFE => ActionOperation::Goto((Self::parse_goto(&mut iter)?,)),
-                0x97 => ActionOperation::PrintAtV0(Self::parse_message_num_num(&mut iter)?),
+                0x97 => if version == "2.089" {ActionOperation::PrintAtV0(Self::parse_message_num_num(&mut iter)?) } else {panic!("DAMN")},
                 0x96 => ActionOperation::TraceInfo(Self::parse_num_num_num(&mut iter)?),
                 0x94 => ActionOperation::RepositionToV(Self::parse_object_var_var(&mut iter)?),
                 0x93 => ActionOperation::RepositionTo(Self::parse_object_num_num(&mut iter)?),
+                0x90 => ActionOperation::Log((Self::parse_message(&mut iter)?,)),
                 0x8F => ActionOperation::SetGameID((Self::parse_message(&mut iter)?,)),
+                0x8E => ActionOperation::ScriptSize((Self::parse_num(&mut iter)?,)),
                 0x8D => ActionOperation::Version(()),
                 0x8C => ActionOperation::ToggleMonitor(()),
                 0x8B => ActionOperation::InitJoy(()),
@@ -1581,7 +1590,7 @@ impl LogicSequence {
                 0x89 => ActionOperation::EchoLine(()),
                 0x88 => ActionOperation::Pause(()),
                 0x87 => ActionOperation::ShowMem(()),
-                0x86 => ActionOperation::QuitV0(()),
+                0x86 => if version == "2.089" { ActionOperation::QuitV0(()) } else { ActionOperation::QuitV1((Self::parse_num(&mut iter)?,))},  // Check me, i`m not sure only 2.089 for V0.. see KQI
                 0x85 => ActionOperation::ObjStatusV((Self::parse_var(&mut iter)?,)),
                 0x84 => ActionOperation::PlayerControl(()),
                 0x83 => ActionOperation::ProgramControl(()),
@@ -1642,7 +1651,7 @@ impl LogicSequence {
                 0x44 => ActionOperation::ObserveObjs((Self::parse_object(&mut iter)?,)),
                 0x43 => ActionOperation::IgnoreObjs((Self::parse_object(&mut iter)?,)),
                 0x41 => ActionOperation::ObjectOnLand((Self::parse_object(&mut iter)?,)),
-                //0x40 => ActionOperation::ObjectOnWater((Self::parse_object(&mut iter)?,)),
+                0x40 => ActionOperation::ObjectOnWater((Self::parse_object(&mut iter)?,)),
                 0x3F => ActionOperation::SetHorizon((Self::parse_num(&mut iter)?,)),
                 0x3E => ActionOperation::ObserveHorizon((Self::parse_object(&mut iter)?,)),
                 0x3D => ActionOperation::IgnoreHorizon((Self::parse_object(&mut iter)?,)),
@@ -1651,7 +1660,7 @@ impl LogicSequence {
                 0x3A => ActionOperation::StopUpdate((Self::parse_object(&mut iter)?,)),
                 0x39 => ActionOperation::GetPriority(Self::parse_object_var(&mut iter)?),
                 0x38 => ActionOperation::ReleasePriority((Self::parse_object(&mut iter)?,)),
-                //0x37 => ActionOperation::SetPriorityV(Self::parse_object_var(&mut iter)?),
+                0x37 => ActionOperation::SetPriorityV(Self::parse_object_var(&mut iter)?),
                 0x36 => ActionOperation::SetPriority(Self::parse_object_num(&mut iter)?),
                 0x34 => ActionOperation::CurrentView(Self::parse_object_var(&mut iter)?),
                 0x33 => ActionOperation::CurrentLoop(Self::parse_object_var(&mut iter)?),
@@ -1677,6 +1686,7 @@ impl LogicSequence {
                 0x1F => ActionOperation::LoadViewV((Self::parse_var(&mut iter)?,)),
                 0x1E => ActionOperation::LoadView((Self::parse_num(&mut iter)?,)),
                 0x1D => ActionOperation::ShowPriScreen(()),
+                0x1C => ActionOperation::OverlayPic((Self::parse_var(&mut iter)?,)),
                 0x1B => ActionOperation::DiscardPic((Self::parse_var(&mut iter)?,)),
                 0x1A => ActionOperation::ShowPic(()),
                 0x19 => ActionOperation::DrawPic((Self::parse_var(&mut iter)?,)),
@@ -1831,8 +1841,15 @@ impl LogicSequence {
         match action {
             // Not complete
             ActionOperation::Sound((_num,flag)) => /* TODO RAGI  - for now, just pretend sound finished*/ state.set_flag(flag,true),
+            ActionOperation::StopSound(()) => /* TODO RAGI - for now, since we complete sounds straight away, does nothing */ {},
+            ActionOperation::SetGameID((m,)) => /* TODO RAGI - if needed */{let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize];println!("TODO : SetGameID {:?}",m);},
+            ActionOperation::ConfigureScreen((a,b,c)) => /* TODO RAGI */ { println!("TODO : ConfigureScreen {:?},{:?},{:?}",a,b,c);},
+            ActionOperation::SetKey((a,b,c)) => /* TODO RAGI */ { println!("TODO : SetKey {:?},{:?},{:?}",a,b,c);},
+            ActionOperation::ObjectOnWater((a,)) => /* TODO RAGI */ { println!("TODO : ObjectOnWater {:?}",a);},
+            ActionOperation::Wander((a,)) => /* TODO RAGI */ { println!("TODO : Wander {:?}",a);},
 
             // Not needed
+            ActionOperation::ScriptSize((_num,)) => {/* NO-OP-RAGI */},
             ActionOperation::LoadView((_num,)) => {/* NO-OP-RAGI */},
             ActionOperation::LoadViewV((_var,)) => {/* NO-OP-RAGI */},
             ActionOperation::LoadPic((_var,)) => {/* NO-OP-RAGI */},
@@ -1890,7 +1907,13 @@ impl LogicSequence {
             ActionOperation::SetString((s,m)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; state.set_string(s,m); },
             ActionOperation::Draw((obj,)) => state.mut_object(obj).set_visible(true),
             ActionOperation::EndOfLoop((obj,flag)) => state.mut_object(obj).set_one_shot(flag),
-            ActionOperation::MoveObj((obj,num1,num2,num3,flag)) => { let x=state.get_num(num1); let y=state.get_num(num2); let s=state.get_num(num3); state.mut_object(obj).set_move(x, y, s, flag); },
+            ActionOperation::MoveObj((obj,num1,num2,num3,flag)) => { 
+                let x=state.get_num(num1); let y=state.get_num(num2); let s=state.get_num(num3); 
+                state.mut_object(obj).set_move(x, y, s, flag);
+                if *obj==OBJECT_EGO {
+                    state.set_program_control();
+                }
+            },
             ActionOperation::Erase((obj,)) => state.mut_object(obj).set_visible(false),
             ActionOperation::Display((num1,num2,m)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; let x=state.get_num(num2); let y=state.get_num(num1); Self::display_text(resources,state,x,y,m); },
             ActionOperation::DisplayV((var1,var2,var3)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(&TypeMessage::from(state.get_var(var3))) as usize]; let x=state.get_var(var2); let y=state.get_var(var1); Self::display_text(resources,state,x,y,m); },
