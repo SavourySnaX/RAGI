@@ -414,8 +414,16 @@ impl LogicState {
         }
     }
 
+    pub fn get_flags(&self) -> impl Iterator<Item = bool> {
+        self.flag.into_iter()
+    }
+
     pub fn get_flag(&self,f:&TypeFlag) -> bool {
         self.flag[f.value as usize]
+    }
+
+    pub fn get_vars(&self) -> impl Iterator<Item = u8> {
+        self.var.into_iter()
     }
 
     pub fn get_var(&self,v:&TypeVar) -> u8 {
@@ -432,6 +440,10 @@ impl LogicState {
 
     pub fn get_message(&self,m:&TypeMessage) -> u8 {
         m.value
+    }
+
+    pub fn get_strings(&self) -> impl Iterator<Item = &String> {
+        self.string.iter()
     }
 
     pub fn get_string(&self,s:&TypeString) -> &String {
@@ -514,7 +526,7 @@ impl LogicState {
     }
 
     pub fn active_objects(&self) -> impl Iterator<Item = (usize,Sprite)> {
-        self.objects.into_iter().take_while(|x| x.active).enumerate()
+        (0..self.objects.len()).zip(self.objects.into_iter()).filter(|(_,b)| b.active)
     }
 
     pub fn picture(&self) -> &[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
@@ -642,6 +654,12 @@ impl From<u16> for TypeWord {
 impl From<i16> for TypeGoto {
     fn from(value: i16) -> Self {
         TypeGoto {value}
+    }
+}
+
+impl Into<usize> for TypeGoto {
+    fn into(self) -> usize {
+        self.value as usize
     }
 }
 
@@ -1195,21 +1213,8 @@ impl LogicResource {
             println!("{:?}",g.0);
         }
 
-        let mut indent = 2;
-        for logic_operation in &self.logic_sequence.operations {
-            if let Some(label) = self.logic_sequence.labels.get(&logic_operation.address) {
-               for _ in 0..label.if_destination_cnt {
-                    indent-=2;
-                    println!("{:indent$}}}","",indent=indent);
-                }
-                if label.is_goto_destination {
-                    println!("label_{}:",label.operation_offset);
-                } 
-            }
-
-            println!("{:indent$}{v}","",v=self.instruction_disassemble(&logic_operation.action,words,items),indent=indent);
-
-            if let ActionOperation::If(_) = logic_operation.action { println!("{:indent$}{{","",indent=indent);indent+=2; }
+        for (_,s) in self.get_disassembly_iterator(words, items) {
+            println!("{s}");
         }
     }
 
@@ -1224,11 +1229,11 @@ pub struct LogicResourceDisassemblyIterator<'a> {
     items:&'a Objects,
     indent:usize,
     offs:usize,
-    temp_string_vec:VecDeque<String>,
+    temp_string_vec:VecDeque<(Option<usize>,String)>,
 }
 
 impl<'a> Iterator for LogicResourceDisassemblyIterator<'a> {
-    type Item = String;
+    type Item = (Option<usize>,String);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.temp_string_vec.is_empty() {
@@ -1239,16 +1244,16 @@ impl<'a> Iterator for LogicResourceDisassemblyIterator<'a> {
             if let Some(label) = self.logic_resource.get_logic_sequence().labels.get(&logic_operation.address) {
                 for _ in 0..label.if_destination_cnt {
                     self.indent-=2;
-                    self.temp_string_vec.push_back(format!("{:indent$}}}","",indent=self.indent));
+                    self.temp_string_vec.push_back((None,format!("{:indent$}}}","",indent=self.indent)));
                 }
                 if label.is_goto_destination {
-                    self.temp_string_vec.push_back(format!("label_{}:",label.operation_offset));
+                    self.temp_string_vec.push_back((None,format!("label_{}:",label.operation_offset)));
                 } 
             }
 
-            self.temp_string_vec.push_back(format!("{:indent$}{v}","",v=self.logic_resource.instruction_disassemble(&logic_operation.action,self.words,self.items),indent=self.indent));
+            self.temp_string_vec.push_back((Some(self.offs),format!("{:indent$}{v}","",v=self.logic_resource.instruction_disassemble(&logic_operation.action,self.words,self.items),indent=self.indent)));
 
-            if let ActionOperation::If(_) = logic_operation.action { self.temp_string_vec.push_back(format!("{:indent$}{{","",indent=self.indent)); self.indent+=2; }
+            if let ActionOperation::If(_) = logic_operation.action { self.temp_string_vec.push_back((None,format!("{:indent$}{{","",indent=self.indent))); self.indent+=2; }
 
             self.offs+=1;
         }
@@ -1823,11 +1828,6 @@ impl LogicSequence {
 
     fn interpret_instruction(&self,resources:&GameResources,state:&mut LogicState,pc:&LogicExecutionPosition,action:&ActionOperation) -> Option<LogicExecutionPosition> {
 
-        //println!("{:?}",state);
-        if true { //state.is_text_mode() {
-            println!("{:?}",action);
-        }
-
         match action {
             // Not complete
             ActionOperation::Sound((_num,flag)) => /* TODO RAGI  - for now, just pretend sound finished*/ state.set_flag(flag,true),
@@ -2009,7 +2009,7 @@ impl LogicSequence {
 
 }
 
-#[derive(Copy,Clone,Debug)]
+#[derive(Copy,Clone,Debug,Hash,PartialEq,Eq)]
 pub struct LogicExecutionPosition {
     logic_file:usize,
     program_counter:usize,
@@ -2045,6 +2045,11 @@ impl LogicExecutionPosition {
     pub fn get_logic(&self) -> usize {
         self.logic_file
     }
+    
+    pub fn get_pc(&self) -> usize {
+        self.program_counter
+    }
+
 }
 
 //sprite stuff

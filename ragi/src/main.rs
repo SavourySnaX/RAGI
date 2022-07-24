@@ -1,7 +1,7 @@
 
 use glow::HasContext;
 use helpers::conv_rgba;
-use logic::{LogicResource, LogicSequence, LogicState, LogicExecutionPosition, GameResources, render_sprites, update_sprites, VAR_OBJ_TOUCHED_BORDER, VAR_OBJ_EDGE, FLAG_SAID_ACCEPTED_INPUT, FLAG_COMMAND_ENTERED, FLAG_ROOM_FIRST_TIME, FLAG_RESTART_GAME, FLAG_RESTORE_GAME};
+use logic::{LogicResource, LogicSequence, LogicState, LogicExecutionPosition, GameResources, render_sprites, update_sprites, VAR_OBJ_TOUCHED_BORDER, VAR_OBJ_EDGE, FLAG_SAID_ACCEPTED_INPUT, FLAG_COMMAND_ENTERED, FLAG_ROOM_FIRST_TIME, FLAG_RESTART_GAME, FLAG_RESTORE_GAME, VAR_CURRENT_ROOM};
 
 
 use sdl2::event::Event;
@@ -98,6 +98,7 @@ impl TexturesUi {
 
 fn main() -> Result<(), String> {
 
+    //let mut interpretter=Interpretter::new("../images/Leisure Suit Larry in the Land of the Lounge Lizards (1987)(Sierra On-Line, Inc.) [Adventure]/").unwrap();
     let mut interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/").unwrap();
 
     let sdl_context = sdl2::init()?;
@@ -107,7 +108,7 @@ fn main() -> Result<(), String> {
     gl_attr.set_context_version(3, 3);
     gl_attr.set_context_profile(sdl2::video::GLProfile::Core);
 
-    let window = video_subsystem.window("R.A.G.I", 640*2, 400*2)
+    let window = video_subsystem.window("R.A.G.I", 640*2+400, 400*2)
         .position_centered()
         .resizable()
         .opengl()
@@ -130,6 +131,10 @@ fn main() -> Result<(), String> {
 
     let textures_ui = TexturesUi::new(&gl,&mut textures);
 
+    interpretter.breakpoints.insert(LogicExecutionPosition::new(2,0), false);
+
+    let mut resume=false;
+    let mut step=false;
     'running: loop {
         unsafe {
             gl.clear_color(0.0,0.3,0.3,1.0);
@@ -155,7 +160,14 @@ fn main() -> Result<(), String> {
         imgui_sdl2.prepare_frame(imgui.io_mut(), &window, &event_pump.mouse_state());
 
         // The rest of the game loop goes here...
-        interpretter.run();
+        let mut just_paused=false;
+        if !interpretter.is_paused() || resume || step {
+            interpretter.run(resume,step);
+            just_paused=interpretter.is_paused();
+        }
+
+        resume=false;
+        step=false;
 
         // imgui windows etc
         let pic = conv_rgba(interpretter.state.final_buffer());
@@ -177,10 +189,84 @@ fn main() -> Result<(), String> {
         });
 
         Window::new("LOGIC").build(&ui, || {
-            let logic = interpretter.resources.logic.get(&0);
-            if !logic.is_none() {
-                for s in logic.unwrap().get_disassembly_iterator(&interpretter.resources.words, &interpretter.resources.objects) {
-                    ui.text(s);
+            if interpretter.is_paused() {
+                let top_of_stack = &interpretter.stack[interpretter.stack.len()-1];
+                let file = top_of_stack.get_logic();
+                let logic = interpretter.resources.logic.get(&file);
+                if !logic.is_none() {
+                    if let Some(_t) = ui.begin_table_with_flags("logic_table",2,TableFlags::RESIZABLE|TableFlags::SCROLL_Y|TableFlags::SCROLL_X|TableFlags::NO_KEEP_COLUMNS_VISIBLE) {
+                        for (g,s) in logic.unwrap().get_disassembly_iterator(&interpretter.resources.words, &interpretter.resources.objects) {
+                            ui.table_next_row();
+                            ui.table_set_column_index(0);
+                            if let Some(g) = g {
+                                let address =LogicExecutionPosition::new(file,g.into());
+                                let mut selected = interpretter.breakpoints.contains_key(&address);
+                                if Selectable::new(format!("{} {:?}",if *top_of_stack==address {">"} else {" "},address)).flags(SelectableFlags::SPAN_ALL_COLUMNS).build_with_ref(&ui,&mut selected) {
+                                    if interpretter.breakpoints.contains_key(&address) {
+                                        interpretter.breakpoints.remove(&address);
+                                    } else {
+                                        interpretter.breakpoints.insert(address, false);
+                                    }
+                                }
+                                if just_paused && *top_of_stack == address {
+                                    ui.set_scroll_here_y();
+                                }
+                            }
+                            ui.table_set_column_index(1);
+                            ui.text(s);
+                        }
+                    }
+                }
+            }
+        });
+
+        Window::new("FLAGS").build(&ui, || {
+            if interpretter.is_paused() {
+                for (index,f) in interpretter.state.get_flags().enumerate() {
+                    if f {
+                        ui.text(format!("{:3} : {}", index, f));
+                    }
+                }
+            }
+        });
+
+        Window::new("VARS").build(&ui, || {
+            if interpretter.is_paused() {
+                for (index,v) in interpretter.state.get_vars().enumerate() {
+                    if v!=0 {
+                        ui.text(format!("{:3} : {}", index, v));
+                    }
+                }
+            }
+        });
+        
+        Window::new("STRINGS").build(&ui, || {
+            if interpretter.is_paused() {
+                for (index,s) in interpretter.state.get_strings().enumerate() {
+                    if !s.is_empty() {
+                        ui.text(format!("{:3} : {}", index, s));
+                    }
+                }
+            }
+        });
+
+
+        Window::new("STACK").build(&ui, || {
+            if interpretter.is_paused() {
+                for a in (&interpretter.stack).into_iter().rev() {
+                    ui.text(format!("Logic : {} | PC : {}", a.get_logic(),a.get_pc()));
+                }
+            }
+        });
+
+        Window::new("BUTTONS").build(&ui, || {
+            if interpretter.is_paused() {
+                resume = ui.button("Resume");
+                step = ui.button("Step");
+            } else {
+                if ui.button("Pause") {
+                    //insert a temporary breakpoint on the current room
+                    interpretter.breakpoints.insert(LogicExecutionPosition::new(interpretter.state.get_var(&VAR_CURRENT_ROOM).into(),0),true);
                 }
             }
         });
@@ -202,6 +288,7 @@ struct Interpretter {
     pub state:LogicState,
     pub stack:Vec<LogicExecutionPosition>,
     pub keys:Vec<Keycode>,
+    pub breakpoints:HashMap<LogicExecutionPosition,bool>,
 }
 
 impl Interpretter {
@@ -212,11 +299,16 @@ impl Interpretter {
             state: LogicState::new(),
             stack: Vec::new(),
             keys: Vec::new(),
+            breakpoints: HashMap::new(),
         })
     }
 
-    pub fn do_call(resources:&GameResources,stack:&mut Vec<LogicExecutionPosition>,state:&mut LogicState, logics:&HashMap<usize,LogicResource>) {
+    pub fn is_paused(&self) -> bool {
+        !self.stack.is_empty() && !self.stack[self.stack.len()-1].is_input_request()
+    }
 
+    pub fn do_call(breakpoints:&mut HashMap<LogicExecutionPosition,bool>,resources:&GameResources,stack:&mut Vec<LogicExecutionPosition>,state:&mut LogicState, logics:&HashMap<usize,LogicResource>,resume:bool,single_step:bool) {
+        let mut resume = resume;
         while !stack.is_empty() {
             let stack_pos = stack.len()-1;
             let entry = stack[stack_pos];
@@ -224,6 +316,16 @@ impl Interpretter {
             let actions = logic_sequence.get_operations();
             let mut exec = entry;
             loop {
+                if !resume {
+                    if breakpoints.contains_key(&exec) && !single_step {
+                        if breakpoints[&exec] {
+                            breakpoints.remove(&exec);
+                        }
+                        stack[stack_pos]=exec;
+                        return;
+                    }
+                }
+                resume=false;
                 match logic_sequence.interpret_instructions(resources,state,&exec,actions) {
                     Some(newpc) => {
                         if newpc.is_input_request() {
@@ -232,13 +334,23 @@ impl Interpretter {
                         } else if newpc.is_call(entry.get_logic()) {
                             stack[stack_pos]=exec.next();
                             stack.push(newpc);
+                            if single_step {
+                                return;
+                            }
                             break;
                         } else {
                             exec = newpc;
+                            if single_step {
+                                stack[stack_pos]=exec;
+                                return;
+                            }
                         }
                     },
                     None => {
                         stack.pop();
+                        if single_step {
+                            return;
+                        }
                         break;
                     },
                 }
@@ -247,11 +359,11 @@ impl Interpretter {
 
     }
 
-    pub fn call(resources:&GameResources,stack:&mut Vec<LogicExecutionPosition>,state:&mut LogicState,logic_file:usize, logics:&HashMap<usize,LogicResource>) {
+    pub fn call(breakpoints:&mut HashMap<LogicExecutionPosition,bool>,resources:&GameResources,stack:&mut Vec<LogicExecutionPosition>,state:&mut LogicState,logic_file:usize, logics:&HashMap<usize,LogicResource>,resume:bool,single_step:bool) {
         if stack.is_empty() {
             stack.push(LogicExecutionPosition::new(logic_file,0));
         }
-        Self::do_call(resources, stack, state,logics);
+        Self::do_call(breakpoints, resources, stack, state,logics,resume,single_step);
     }
 
     pub fn key_code_pressed(&mut self,key_code:Keycode) {
@@ -262,7 +374,7 @@ impl Interpretter {
         self.keys.clear();
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self,resume:bool,single_step:bool) {
 
         let mut resuming = !self.stack.is_empty();
         let mutable_state = &mut self.state;
@@ -298,7 +410,7 @@ impl Interpretter {
                 mutable_state.reset_new_room();
             }
             
-            Self::call(&self.resources,mutable_stack,mutable_state, 0, &self.resources.logic);
+            Self::call(&mut self.breakpoints,&self.resources,mutable_stack,mutable_state, 0, &self.resources.logic,resume,single_step);
             if !mutable_stack.is_empty() {
                 return;
             } else {
