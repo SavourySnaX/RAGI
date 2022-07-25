@@ -464,7 +464,7 @@ impl Interpretter {
             // update all controlled objects on screen
             // if new room issued, rerun logic
             if mutable_state.get_new_room()!=0 {
-                LogicSequence::new_room(mutable_state,mutable_state.get_new_room());
+                LogicSequence::new_room(&self.resources,mutable_state,mutable_state.get_new_room());
             } else {
                 break;
             }

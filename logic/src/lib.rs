@@ -1894,15 +1894,16 @@ impl LogicSequence {
         result
     }
 
-    pub fn new_room(state:&mut LogicState,room:u8) {
+    pub fn new_room(resources:&GameResources,state:&mut LogicState,room:u8) {
         // Stop.update()
         //unanimate.all()
         for (_,obj) in state.mut_active_objects() {
             obj.set_active(false);
+            obj.set_visible(false);
             //obj.reset();  (may not be needed)
         }
         //destroy all resources
-        //player.control()
+        state.set_player_control();
         //unblock()
         state.set_horizon(36);
         state.set_var(&VAR_PREVIOUS_ROOM,state.get_var(&VAR_CURRENT_ROOM));
@@ -1911,7 +1912,20 @@ impl LogicSequence {
         state.set_var(&VAR_OBJ_EDGE,0);
         state.set_var(&VAR_MISSING_WORD,0);
         state.set_var(&VAR_EGO_VIEW,state.object(&OBJECT_EGO).get_view());
-        //ego coords from var 2 (place ego based on last room basically)
+        
+        let c = usize::from(state.object(&OBJECT_EGO).get_cel());
+        let cels = get_cells(resources, state.object(&OBJECT_EGO));
+        let cell = &cels[c];
+
+        match state.get_var(&VAR_EGO_EDGE) {
+            0 => {},
+            1 => state.mut_object(&OBJECT_EGO).set_y(167),
+            2 => state.mut_object(&OBJECT_EGO).set_x(1),
+            3 => state.mut_object(&OBJECT_EGO).set_y(37+cell.get_height()),
+            4 => state.mut_object(&OBJECT_EGO).set_x(160-cell.get_width()),
+            _ => panic!("Invalid edge in EGO EDGE"),
+        }
+
         state.set_var(&VAR_EGO_EDGE,0);
         state.set_flag(&FLAG_COMMAND_ENTERED,false);
         state.set_flag(&FLAG_ROOM_FIRST_TIME,true);
@@ -2200,6 +2214,9 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
 
     for num in state.active_objects_indices() {
         let obj_num = &TypeObject::from(num as u8);
+        if !(state.object(obj_num).visible && !state.object(obj_num).frozen) {
+            continue;
+        }
         if state.object(obj_num).move_obj {
             let x=FP32::from(state.object(obj_num).get_x_fp16());
             let y=FP32::from(state.object(obj_num).get_y_fp16());
@@ -2224,7 +2241,7 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
         if state.object(obj_num).get_direction()!=0 {
             // Now perform motion based on direction
             // Collision/rules check here I think
-            let (moved, nx,ny) = update_move(resources,state,&state.object(obj_num));
+            let (moved, nx,ny) = update_move(resources,state,obj_num);
             state.mut_object(obj_num).set_moved(moved);
             if moved {
                 state.mut_object(obj_num).set_x_fp16(nx);
@@ -2237,8 +2254,18 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
     }
 }
 
-pub fn update_move(resources:&GameResources,state:&LogicState,obj:&Sprite) -> (bool,FP16,FP16) {
+fn update_edge(state:&mut LogicState,obj_num:&TypeObject,edge:u8) {
+    if *obj_num == OBJECT_EGO {
+        state.set_var(&VAR_EGO_EDGE,edge);
+    } else {
+        state.set_var(&VAR_OBJ_EDGE,edge);
+        state.set_var(&VAR_OBJ_TOUCHED_BORDER,obj_num.value);
+    }
+}
 
+pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeObject) -> (bool,FP16,FP16) {
+
+    let obj=state.object(&obj_num);
     let (dx,dy) = get_delta_fp32_from_direction(obj.get_direction());
     let x=FP32::from(obj.get_x_fp16());
     let y=FP32::from(obj.get_y_fp16());
@@ -2261,16 +2288,28 @@ pub fn update_move(resources:&GameResources,state:&LogicState,obj:&Sprite) -> (b
     let ty:usize = ny.to_num();
     
     // clip in screen bounds
-    if nx<0 || ny<0 {
+    if x<0 || y<0 { // y should ideally check y-h
+        if x<0 {
+            update_edge(state,obj_num,4);
+        } else {
+            update_edge(state,obj_num,1);
+        }
         return (false,FP16::ZERO,FP16::ZERO);
     }
-    if tx+w >= PIC_WIDTH_USIZE || ty-h >= PIC_HEIGHT_USIZE {
+    if tx+w >= PIC_WIDTH_USIZE || ty >= PIC_HEIGHT_USIZE {
+        if tx+w >= PIC_WIDTH_USIZE {
+            update_edge(state,obj_num,2);
+        } else {
+            update_edge(state,obj_num,3);
+        }
+
         return (false,FP16::ZERO,FP16::ZERO);
     }
 
-    // todo horizon check
+    // horizon check
     if !obj.ignore_horizon {
         if ty < (state.horizon as usize) {
+            update_edge(state,obj_num,1);
             return (false,FP16::ZERO,FP16::ZERO);
         }
     }
