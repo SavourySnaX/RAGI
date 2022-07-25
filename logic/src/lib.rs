@@ -3,10 +3,11 @@ use std::{collections::{HashMap, VecDeque}, hash::Hash, ops, fmt, fs};
 use dir_resource::{ResourceDirectoryEntry, ResourceDirectory};
 use fixed::{FixedU16, types::extra::U8, FixedI32};
 use helpers::{Root, double_pic_width};
+use itertools::Itertools;
 use objects::Objects;
 use picture::*;
 use rand::{Rng, prelude::ThreadRng};
-use view::{ViewResource, ViewCel};
+use view::{ViewResource, ViewCel, ViewLoop};
 use volume::Volume;
 use words::Words;
 
@@ -20,6 +21,7 @@ pub const VAR_EGO_EDGE:TypeVar = type_var_from_u8(2);
 pub const VAR_CURRENT_SCORE:TypeVar = type_var_from_u8(3);
 pub const VAR_OBJ_TOUCHED_BORDER:TypeVar = type_var_from_u8(4);
 pub const VAR_OBJ_EDGE:TypeVar = type_var_from_u8(5);
+pub const VAR_EGO_MOTION_DIR:TypeVar = type_var_from_u8(6);
 
 pub const VAR_MISSING_WORD:TypeVar = type_var_from_u8(9);
 
@@ -39,15 +41,21 @@ type FP32=FixedI32<U8>;
 #[derive(Debug,Copy,Clone)] // TODO revisit copy
 pub struct Sprite {
     active:bool,    // object is processed
+    moved:bool,     // object moved last tick
     frozen:bool,    // object ignores updates (animation/etc)
     visible:bool,   // draw to screen (draw/erase, to confirm if this is automated (sprite), or blit)
     observing:bool,         // treats other objects as obstacles
     ignore_barriers:bool,   // ignores pixels of priority and block set with block_command
     ignore_horizon:bool,    // ignores horizon position during movement
+    fixed_loop:bool,        // loop is not automatically determined
+    restrict_to_land:bool,  // object is restricted to non priority 3 pixels
+    restrict_to_water:bool, // object is restricted to priority 3 pixels
     cycle:bool,     // cycle loop automatically
     one_shot:bool,  // runs until end of current loop, and triggers flag
     reverse:bool,   // reverses the order of animation 
     move_obj:bool,  // indicates the object has been told to move to a dest point
+    wander:bool,    // object should move about randomly
+    direction:u8,   // current direction of travel (0-stop, 1-N, 2-NE, 3-E, ... 8-NW)
     view:u8,
     cloop:u8,
     cel:u8,
@@ -71,15 +79,21 @@ impl Sprite {
     pub fn new() -> Sprite {
         Sprite { 
             active: false, 
+            moved: false,
             frozen: false,
             visible: false,
             observing: false, 
             ignore_barriers: false,
             ignore_horizon: false,
-            cycle: false, 
+            fixed_loop: false,
+            restrict_to_land: false,
+            restrict_to_water: false,
+            cycle: true, 
             one_shot: false,
             reverse: false,
             move_obj: false,
+            wander: false,
+            direction: 0,
             view: 0, 
             cloop: 0,
             cel: 0,
@@ -90,7 +104,7 @@ impl Sprite {
             move_flag: TypeFlag::from(0),
             ex: FP16::from_num(0),
             ey: FP16::from_num(0),
-            step_size: FP16::from_num(0),
+            step_size: FP16::from_bits(4<<6),
         }
     }
 
@@ -100,6 +114,10 @@ impl Sprite {
 
     pub fn get_y(&self) -> u8 {
         self.y.to_num()
+    }
+
+    pub fn get_direction(&self) -> u8 {
+        self.direction
     }
 
     pub fn get_view(&self) -> u8 {
@@ -116,6 +134,22 @@ impl Sprite {
 
     pub fn get_visible(&self) -> bool {
         self.visible
+    }
+    
+    pub fn is_restricted_to_land(&self) -> bool {
+        self.restrict_to_land
+    }
+
+    pub fn is_restricted_to_water(&self) -> bool {
+        self.restrict_to_water
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
+
+    pub fn has_moved(&self) -> bool {
+        self.moved
     }
 
     pub fn get_x_fp16(&self) -> FP16 {
@@ -192,12 +226,20 @@ impl Sprite {
     }
 
     pub fn set_step_size(&mut self,s:u8) {
-        let s = if s==0 {1} else {s};   // Not Sure
-        self.step_size=FP16::from_bits((s as u16)<<6);
+        if s!=0 {
+            self.step_size=FP16::from_bits((s as u16)<<6);
+        }
+    }
+
+    pub fn set_direction(&mut self,d:u8) {
+        self.direction=d;
     }
 
     pub fn set_cycling(&mut self,b:bool) {
         self.cycle=b;
+        if b {
+            self.one_shot=false;
+        }
     }
 
     pub fn set_x(&mut self,n:u8) {
@@ -226,7 +268,6 @@ impl Sprite {
    
     pub fn set_loop(&mut self,n:u8) {
         self.cloop = n;
-        self.cel=0;
     }
     
     pub fn set_cel(&mut self,n:u8) {
@@ -235,12 +276,14 @@ impl Sprite {
 
     pub fn set_one_shot(&mut self,f:&TypeFlag) {
         self.one_shot=true;
+        self.cycle=false;
         self.one_shot_flag = *f;
     }
 
     pub fn set_one_shot_reverse(&mut self,f:&TypeFlag) {
         self.one_shot=true;
         self.reverse=true;
+        self.cycle=false;
         self.one_shot_flag = *f;
     }
 
@@ -248,7 +291,12 @@ impl Sprite {
         self.one_shot=false;
     }
 
+    pub fn set_moved(&mut self,b:bool) {
+        self.moved=b;
+    }
+
     pub fn set_move(&mut self,x:u8,y:u8,s:u8,f:&TypeFlag) {
+        self.wander=false;
         self.move_obj=true;
         self.ex=FP16::from_num(x);
         self.ey=FP16::from_num(y);
@@ -272,6 +320,21 @@ impl Sprite {
 
     pub fn reset(&mut self) {
         *self=Sprite::new();
+    }
+
+    pub fn set_restrict_to_water(&mut self) {
+        self.restrict_to_land=false;
+        self.restrict_to_water=true;
+    }
+
+    pub fn set_restrict_to_land(&mut self) {
+        self.restrict_to_land=true;
+        self.restrict_to_water=false;
+    }
+
+    pub fn set_wander(&mut self) {
+        self.wander=true;
+        self.move_obj=false;
     }
 }
 
@@ -397,7 +460,7 @@ impl LogicState {
             new_room: 0,
             text_mode:false,
             input: false,
-            ego_player_control: false,
+            ego_player_control: true,
             status_visible: false,
             horizon: 0,
             flag: [false;256],
@@ -457,6 +520,10 @@ impl LogicState {
 
     pub fn is_text_mode(&self) -> bool {
         self.text_mode
+    }
+
+    pub fn is_ego_player_controlled(&self) -> bool {
+        self.ego_player_control
     }
     
     pub fn get_mut_string(&mut self,s:&TypeString) -> &mut String {
@@ -526,8 +593,23 @@ impl LogicState {
         &mut self.objects[o.value as usize]
     }
 
-    pub fn active_objects(&self) -> impl Iterator<Item = (usize,Sprite)> {
-        (0..self.objects.len()).zip(self.objects.into_iter()).filter(|(_,b)| b.active)
+    pub fn active_objects_indices(&self) -> impl Iterator<Item = usize>{
+        let t_indices:Vec<usize> = (0..self.objects.len())
+            .filter(|b| self.object(&type_object_from_u8(*b as u8)).is_active())
+            .collect_vec();
+        t_indices.into_iter()
+    }
+    
+    pub fn active_objects_indices_sorted_y(&self) -> impl Iterator<Item = usize> {
+        let t_indices:Vec<usize> = (0..self.objects.len())
+            .filter(|b| self.object(&type_object_from_u8(*b as u8)).is_active())
+            .sorted_unstable_by(|a,b| Ord::cmp(&self.object(&type_object_from_u8(*a as u8)).get_y_fp16(),&self.object(&type_object_from_u8(*b as u8)).get_y_fp16()))
+            .collect_vec();
+        t_indices.into_iter()
+    }
+    
+    pub fn mut_active_objects(&mut self) -> impl Iterator<Item = (usize,&mut Sprite)> {
+        (0..self.objects.len()).zip(self.objects.iter_mut()).filter(|(_,b)| b.active)
     }
 
     pub fn picture(&self) -> &[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
@@ -1815,9 +1897,9 @@ impl LogicSequence {
     pub fn new_room(state:&mut LogicState,room:u8) {
         // Stop.update()
         //unanimate.all()
-        for (num,_) in state.active_objects() {
-            state.mut_object(&TypeObject::from(num as u8)).active=false;
-            //state.mut_object(&TypeObject::from(num as u8)).reset();  (may not be needed)
+        for (_,obj) in state.mut_active_objects() {
+            obj.set_active(false);
+            //obj.reset();  (may not be needed)
         }
         //destroy all resources
         //player.control()
@@ -1845,8 +1927,6 @@ impl LogicSequence {
             ActionOperation::SetGameID((m,)) => /* TODO RAGI - if needed */{let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize];println!("TODO : SetGameID {:?}",m);},
             ActionOperation::ConfigureScreen((a,b,c)) => /* TODO RAGI */ { println!("TODO : ConfigureScreen {:?},{:?},{:?}",a,b,c);},
             ActionOperation::SetKey((a,b,c)) => /* TODO RAGI */ { println!("TODO : SetKey {:?},{:?},{:?}",a,b,c);},
-            ActionOperation::ObjectOnWater((a,)) => /* TODO RAGI */ { println!("TODO : ObjectOnWater {:?}",a);},
-            ActionOperation::Wander((a,)) => /* TODO RAGI */ { println!("TODO : Wander {:?}",a);},
 
             // Not needed
             ActionOperation::ScriptSize((_num,)) => {/* NO-OP-RAGI */},
@@ -1990,6 +2070,9 @@ impl LogicSequence {
             ActionOperation::StatusLineOn(()) => state.set_status_visible(true),
             ActionOperation::AcceptInput(()) => state.set_input(true),
             ActionOperation::StartCycling((obj,)) => state.mut_object(obj).set_cycling(true),
+            ActionOperation::ObjectOnWater((obj,)) => state.mut_object(obj).set_restrict_to_water(),
+            ActionOperation::Wander((obj,)) => state.mut_object(obj).set_wander(),
+            ActionOperation::StartUpdate((obj,)) => state.mut_object(obj).set_frozen(false),
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
@@ -2075,45 +2158,161 @@ impl LogicExecutionPosition {
 
 }
 
+pub fn get_direction_from_delta(dx:i32,dy:i32) -> u8 {
+
+    match (dx,dy) {
+        (-1,-1) => 8,
+        (-1, 0) => 7,
+        (-1, 1) => 6,
+        ( 0,-1) => 1,
+        ( 0, 0) => 0,
+        ( 0, 1) => 5,
+        ( 1,-1) => 2,
+        ( 1, 0) => 3,
+        ( 1, 1) => 4,
+        _ => panic!("get_direction_from_delta called with non signum values {},{}",dx,dy),
+    }
+}
+
+pub fn get_delta_from_direction(direction:u8) -> (i8,i8) {
+    match direction {
+        0 => ( 0, 0),
+        1 => ( 0,-1),
+        2 => ( 1,-1),
+        3 => ( 1, 0),
+        4 => ( 1, 1),
+        5 => ( 0, 1),
+        6 => (-1, 1),
+        7 => (-1, 0),
+        8 => (-1,-1),
+        _ => panic!("get_delta_fp32_from_direction called with invalid direction {}",direction),
+    }
+
+}
+pub fn get_delta_fp32_from_direction(direction:u8) -> (FP32,FP32) {
+    let (x,y) = get_delta_from_direction(direction);
+    (FP32::from(x),FP32::from(y))
+}
+
 //sprite stuff
-pub fn update_sprites(_resources:&GameResources,state:&mut LogicState) {
+pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
     // Handle direction updates/move logic?
 
-    for (num,obj) in state.active_objects() {
+    for num in state.active_objects_indices() {
         let obj_num = &TypeObject::from(num as u8);
-        if obj.move_obj {
-            // todo set direction var
-            let x=FP32::from(obj.get_x_fp16());
-            let y=FP32::from(obj.get_y_fp16());
-            let s=FP32::from(obj.get_step_size());
-            let ex=FP32::from(obj.get_end_x());
-            let ey=FP32::from(obj.get_end_y());
+        if state.object(obj_num).move_obj {
+            let x=FP32::from(state.object(obj_num).get_x_fp16());
+            let y=FP32::from(state.object(obj_num).get_y_fp16());
+            let ex=FP32::from(state.object(obj_num).get_end_x());
+            let ey=FP32::from(state.object(obj_num).get_end_y());
             let dx = (ex-x).signum();
             let dy = (ey-y).signum();
-            let x=x.wrapping_add(dx*s);
-            let y=y.wrapping_add(dy*s);
-            let bx:i32 = x.to_bits();
-            let by:i32 = y.to_bits();
-            state.mut_object(obj_num).set_x_fp16(FP16::from_bits((bx&0xFFFF)as u16));
-            state.mut_object(obj_num).set_y_fp16(FP16::from_bits((by&0xFFFF)as u16));
-
-            if x.int()==ex.int() && y.int()==ey.int() {
-                state.set_flag(&obj.move_flag, true);
+            let direction = get_direction_from_delta(dx.to_num(), dy.to_num());
+            state.mut_object(obj_num).set_direction(direction);
+            if direction==0 {
+                let mflag = state.object(obj_num).move_flag;
+                state.set_flag(&mflag, true);
                 state.mut_object(obj_num).clear_move();
             }
+
+        } else if state.object(obj_num).wander && !state.object(obj_num).has_moved() {
+            // only changes direction if didn't move last update
+            let direction = state.rng.gen_range(0u8..=8);
+            state.mut_object(obj_num).set_direction(direction);
+        }
+
+        if state.object(obj_num).get_direction()!=0 {
+            // Now perform motion based on direction
+            // Collision/rules check here I think
+            let (moved, nx,ny) = update_move(resources,state,&state.object(obj_num));
+            state.mut_object(obj_num).set_moved(moved);
+            if moved {
+                state.mut_object(obj_num).set_x_fp16(nx);
+                state.mut_object(obj_num).set_y_fp16(ny);
+            }
+        } else {
+            state.mut_object(obj_num).set_moved(false);
         }
 
     }
 }
 
+pub fn update_move(resources:&GameResources,state:&LogicState,obj:&Sprite) -> (bool,FP16,FP16) {
+
+    let (dx,dy) = get_delta_fp32_from_direction(obj.get_direction());
+    let x=FP32::from(obj.get_x_fp16());
+    let y=FP32::from(obj.get_y_fp16());
+    let s=FP32::from(obj.get_step_size());
+    let x=x+dx*s;
+    let y=y+dy*s;
+
+    let bx:i32 = x.to_bits();
+    let by:i32 = y.to_bits();
+    let nx = FP16::from_bits((bx&0xFFFF) as u16);
+    let ny = FP16::from_bits((by&0xFFFF) as u16);
+
+    let c = usize::from(obj.get_cel());
+    let cels = get_cells(resources, &obj);
+    let cell = &cels[c];
+
+    let w = cell.get_width() as usize;
+    let h = cell.get_height() as usize;
+    let tx:usize = nx.to_num();
+    let ty:usize = ny.to_num();
+    
+    // clip in screen bounds
+    if nx<0 || ny<0 {
+        return (false,FP16::ZERO,FP16::ZERO);
+    }
+    if tx+w >= PIC_WIDTH_USIZE || ty-h >= PIC_HEIGHT_USIZE {
+        return (false,FP16::ZERO,FP16::ZERO);
+    }
+
+    // todo horizon check
+    if !obj.ignore_horizon {
+        if ty < (state.horizon as usize) {
+            return (false,FP16::ZERO,FP16::ZERO);
+        }
+    }
+    // todo checks for other control codes (0,1,2)
+
+    // scan x+0..x+width-1 and confirm priority as expected
+
+    for x in 0..w {
+        let pri = fetch_priority_for_pixel(state, tx+x, ty);
+        if pri == 3 && obj.is_restricted_to_land() {
+            return (false,FP16::ZERO,FP16::ZERO);
+        }
+        if pri != 3 && obj.is_restricted_to_water() {
+            return (false,FP16::ZERO,FP16::ZERO);
+        }
+        if pri == 0 {
+            return (false,FP16::ZERO,FP16::ZERO);
+        }
+        if pri == 1 {
+            println!("Todo - conditional block");
+        }
+        if pri == 2 {
+            println!("Todo - trigger?")
+        }
+    }
+
+    (true, nx, ny)
+
+}
+
 pub fn fetch_priority_for_pixel(state:&LogicState,x:usize,y:usize) -> u8 {
+    state.priority()[x+y*PIC_WIDTH_USIZE]
+}
+
+pub fn fetch_priority_for_pixel_rendering(state:&LogicState,x:usize,y:usize) -> u8 {
     let mut pri:u8 = 0;
     let mut y = y;
-    while y<168 && pri<4 {
-        pri = state.priority()[x+y*PIC_WIDTH_USIZE];
+    while y<168 && pri<3 {
+        pri = fetch_priority_for_pixel(state, x, y);
         y+=1;
     }
-    if pri<4 {
+    if pri<3 {
         return 15;  // bottom of screen
     }
     pri
@@ -2165,6 +2364,13 @@ pub fn is_left_and_right_edge_in_box(resources:&GameResources,state:&LogicState,
     is_left_edge_in_box(resources,state,obj,x1,y1,x2,y2) && is_right_edge_in_box(resources,state,obj,x1,y1,x2,y2)
 }
 
+// Todo cache these in the sprites
+pub fn get_loops<'a>(resources:&'a GameResources,obj:&Sprite) -> &'a Vec<ViewLoop> {
+    let v = usize::from(obj.get_view());
+    let view = &resources.views[&v];
+    view.get_loops()
+}
+
 pub fn get_cells<'a>(resources:&'a GameResources,obj:&Sprite) -> &'a Vec<ViewCel> {
     let v = usize::from(obj.get_view());
     let l = usize::from(obj.get_loop());
@@ -2177,56 +2383,88 @@ pub fn get_cells<'a>(resources:&'a GameResources,obj:&Sprite) -> &'a Vec<ViewCel
 pub fn render_sprites(resources:&GameResources,state:&mut LogicState, disable_background:bool) {
     state.post_sprites = if disable_background {[0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]} else {state.back_buffer};
 
-    for (num,obj) in state.active_objects() {
-        let c = usize::from(obj.get_cel());
-        let cels = get_cells(resources, &obj);
+    for num in state.active_objects_indices_sorted_y() {
+        let obj_num = TypeObject::from(num as u8);
+        let c = usize::from(state.object(&obj_num).get_cel());
+        let cels = get_cells(resources, state.object(&obj_num));
         let cell = &cels[c];
 
-        if obj.visible {
-
-            render_sprite(obj, cell, state);
+        if state.object(&obj_num).visible {
+            render_sprite(&obj_num, cell, state);
         }
 
-        let obj_num = TypeObject::from(num as u8);
+        if !state.object(&obj_num).frozen {
+            if !state.object(&obj_num).fixed_loop {
+                let loops = get_loops(resources, state.object(&obj_num));
+                match loops.len() {
+                    0 => {},    // Do nothing
+                    1..=3 => {
+                        let direction = state.object(&obj_num).get_direction();
+                        match direction {
+                            0..=1 | 5 => {}, // Do nothing
+                            2..=4 => state.mut_object(&obj_num).set_loop(0),
+                            6..=8 => state.mut_object(&obj_num).set_loop(1),
+                            _ => panic!("direction not valid range for auto loop {}",direction),
+                        }
+                    },
+                    4..=7 => {
+                        let direction = state.object(&obj_num).get_direction();
+                        match direction {
+                            0 => {}, // Do nothing
+                            1 => state.mut_object(&obj_num).set_loop(3),
+                            2..=4 => state.mut_object(&obj_num).set_loop(0),
+                            5 => state.mut_object(&obj_num).set_loop(2),
+                            6..=8 => state.mut_object(&obj_num).set_loop(1),
+                            _ => panic!("direction not valid range for auto loop {}",direction),
+                        }
+                    },
+                    _ => panic!("Unsupported loop count in auto loop {}",loops.len()),
+                }
+            }
 
-        if obj.one_shot || obj.cycle {
-            if obj.reverse {
-                if c > 0 {
-                    state.mut_object(&obj_num).set_cel(obj.cel.wrapping_sub(1));
-                } else if obj.cycle {
-                    state.mut_object(&obj_num).set_cel((cels.len()-1) as u8);
+            if state.object(&obj_num).one_shot || state.object(&obj_num).cycle {
+                let ccel = state.object(&obj_num).get_cel();
+                if state.object(&obj_num).reverse {
+                    if c > 0 {
+                        state.mut_object(&obj_num).set_cel(ccel.wrapping_sub(1));
+                    } else if state.object(&obj_num).cycle {
+                        state.mut_object(&obj_num).set_cel((cels.len()-1) as u8);
+                    } else {
+                        let oflag = state.object(&obj_num).one_shot_flag;
+                        state.set_flag(&oflag,true);
+                        state.mut_object(&obj_num).clear_one_shot();
+                    }
+                } else if cels.len()-1 > c {
+                    state.mut_object(&obj_num).set_cel(ccel.wrapping_add(1));
+                } else if state.object(&obj_num).cycle {
+                    state.mut_object(&obj_num).set_cel(0);
                 } else {
-                    state.set_flag(&obj.one_shot_flag,true);
+                    let oflag = state.object(&obj_num).one_shot_flag;
+                    state.set_flag(&oflag,true);
                     state.mut_object(&obj_num).clear_one_shot();
                 }
-            } else if cels.len()-1 > c {
-                state.mut_object(&obj_num).set_cel(obj.cel.wrapping_add(1));
-            } else if obj.cycle {
-                state.mut_object(&obj_num).set_cel(0);
-            } else {
-                state.set_flag(&obj.one_shot_flag,true);
-                state.mut_object(&obj_num).clear_one_shot();
             }
         }
     }
 
 }
 
-fn render_sprite(obj: Sprite, cell: &view::ViewCel, state: &mut LogicState) {
-    let x = usize::from(obj.get_x());
-    let y = usize::from(obj.get_y());
+fn render_sprite(obj_num:&TypeObject, cell: &view::ViewCel, state: &mut LogicState) {
+    let x = usize::from(state.object(obj_num).get_x());
+    let y = usize::from(state.object(obj_num).get_y());
     let h = usize::from(cell.get_height());
     let w = usize::from(cell.get_width());
     let t = cell.get_transparent_colour();
     let d = cell.get_data();
+    let mirror=cell.is_mirror(state.object(obj_num).get_loop());
     for yy in 0..h {
         for xx in 0..w {
-            let col = d[xx+yy*w];
+            let col = if mirror {d[(w-xx-1)+yy*w]} else {d[xx+yy*w] };
             if col != t {
                 let sx = xx+x;
                 let sy=yy+y-h;
-                let pri = fetch_priority_for_pixel(state,sx,sy);
-                if pri <= obj.get_priority() {
+                let pri = fetch_priority_for_pixel_rendering(state,sx,sy);
+                if pri <= state.object(obj_num).get_priority() {
                     // We double the pixels of sprites at this point
                     let coord = sx*2+sy*SCREEN_WIDTH_USIZE;
                     state.post_sprites[coord]=col;

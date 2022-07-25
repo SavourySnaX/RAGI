@@ -149,6 +149,13 @@ fn rasterise_fill(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&m
         return;
     }
 
+    if colour_on && colour_pen==15 {
+        return;
+    }
+    if priority_on && !colour_on && priority_pen==4 {
+        return;
+    }
+
     queue.push_back((x,y));
 
     while !queue.is_empty() {

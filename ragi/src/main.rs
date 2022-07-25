@@ -1,7 +1,7 @@
 
 use glow::HasContext;
 use helpers::{conv_rgba, double_pic_width, conv_rgba_transparent};
-use logic::{LogicResource, LogicSequence, LogicState, LogicExecutionPosition, GameResources, render_sprites, update_sprites, VAR_OBJ_TOUCHED_BORDER, VAR_OBJ_EDGE, FLAG_SAID_ACCEPTED_INPUT, FLAG_COMMAND_ENTERED, FLAG_ROOM_FIRST_TIME, FLAG_RESTART_GAME, FLAG_RESTORE_GAME, VAR_CURRENT_ROOM, get_cells};
+use logic::{LogicResource, LogicSequence, LogicState, LogicExecutionPosition, GameResources, render_sprites, update_sprites, VAR_OBJ_TOUCHED_BORDER, VAR_OBJ_EDGE, FLAG_SAID_ACCEPTED_INPUT, FLAG_COMMAND_ENTERED, FLAG_ROOM_FIRST_TIME, FLAG_RESTART_GAME, FLAG_RESTORE_GAME, VAR_CURRENT_ROOM, get_cells, VAR_EGO_MOTION_DIR, OBJECT_EGO, TypeObject, get_direction_from_delta};
 
 
 use sdl2::event::Event;
@@ -103,7 +103,7 @@ fn main() -> Result<(), String> {
 
     let mut interpretter=Interpretter::new("../images/King's Quest v1.0U (1986)(Sierra On-Line, Inc.) [Adventure][!]/","2.272").unwrap();
     //let mut interpretter=Interpretter::new("../images/Leisure Suit Larry in the Land of the Lounge Lizards (1987)(Sierra On-Line, Inc.) [Adventure]/").unwrap(); let version="2.440";
-    //let mut interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/").unwrap(); let version="2.089";
+    //let mut interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/","2.089").unwrap();
 
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -185,8 +185,11 @@ fn main() -> Result<(), String> {
         });
 
         Window::new("OBJECTS").build(&ui, || {
-            for (index,obj) in interpretter.state.active_objects() {
-                TreeNode::new(format!("Object {}",index)).flags(if obj.get_visible() {TreeNodeFlags::BULLET} else {TreeNodeFlags::OPEN_ON_ARROW}).build(&ui, || {
+            for index in interpretter.state.active_objects_indices() {
+                let obj_num = &TypeObject::from(index as u8);
+                let obj=interpretter.state.object(obj_num);
+                let visible = obj.get_visible();
+                TreeNode::new(format!("Object {}",index)).flags(if visible {TreeNodeFlags::BULLET} else {TreeNodeFlags::OPEN_ON_ARROW}).build(&ui, || {
                     let c = usize::from(obj.get_cel());
                     let cels = get_cells(&interpretter.resources, &obj);
                     let cell = &cels[c];
@@ -410,6 +413,25 @@ impl Interpretter {
         if !resuming {
             // if program.control (EGO dir = var(6))
             // if player.control (var(6) = EGO dir)
+            if mutable_state.is_ego_player_controlled() {
+
+                let mut dx=0;
+                let mut dy=0;
+                for k in &self.keys {
+                    match k {
+                        Keycode::Left => dx=-1,
+                        Keycode::Right => dx=1,
+                        Keycode::Up => dy=-1,
+                        Keycode::Down => dy=1,
+                        _ => {},
+                    }
+                }
+
+                mutable_state.set_var(&VAR_EGO_MOTION_DIR, get_direction_from_delta(dx, dy));
+            } else {
+                let d = mutable_state.get_var(&VAR_EGO_MOTION_DIR);
+                mutable_state.mut_object(&OBJECT_EGO).set_direction(d);
+            }
             // For all objects wich animate.obj,start_update and draw
             //  recaclc dir of movement
             update_sprites(&self.resources,mutable_state);
@@ -432,6 +454,8 @@ impl Interpretter {
             }
 
             // dir of EGO <- var(6)
+            let d = mutable_state.get_var(&VAR_EGO_MOTION_DIR);
+            mutable_state.mut_object(&OBJECT_EGO).set_direction(d);
             mutable_state.set_var(&VAR_OBJ_EDGE, 0);
             mutable_state.set_var(&VAR_OBJ_TOUCHED_BORDER, 0);
             mutable_state.set_flag(&FLAG_ROOM_FIRST_TIME, false);

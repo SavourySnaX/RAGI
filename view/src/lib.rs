@@ -21,6 +21,15 @@ impl ViewCel {
         self.flags&0xF
     }
 
+    pub fn is_mirror(&self,cloop:u8) -> bool {
+        if self.flags&0x80 == 0x80 {
+            if ((self.flags&0x70)>>5) != cloop {
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn get_width(&self) -> u8 {
         self.width
     }

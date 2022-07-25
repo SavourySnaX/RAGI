@@ -9,7 +9,8 @@ use volume::Volume;
 fn main() {
 
     //let root = Root::new("../images/Leisure Suit Larry in the Land of the Lounge Lizards (1987)(Sierra On-Line, Inc.) [Adventure]/");
-    let root = Root::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/");
+    let root=Root::new("../images/King's Quest v1.0U (1986)(Sierra On-Line, Inc.) [Adventure][!]/");
+    //let root = Root::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/");
 
     let bytes = root.read_data_or_default("PICDIR");
 
@@ -29,6 +30,11 @@ fn dump_picture_resource(root:&Root,entry:&ResourceDirectoryEntry, index:usize) 
     let bytes = root.read_data_or_default(format!("VOL.{}", entry.volume).as_str());
 
     let volume = Volume::new(bytes.into_iter()).unwrap();
+
+    let volume_iter = volume.fetch_data_slice(entry).unwrap().iter();
+
+    let data:Vec<u8> = volume_iter.cloned().collect();
+    fs::write(format!("../{}-binary.bin",index).as_str(),data).unwrap();
 
     let picture_resource = match PictureResource::new(&volume,entry) {
         Ok(b) => b,
@@ -51,8 +57,4 @@ fn dump_picture_resource(root:&Root,entry:&ResourceDirectoryEntry, index:usize) 
 
     dump_png(format!("../{}-priority.png",index).as_str(),width*2,height,&rgba);
 
-    let volume_iter = volume.fetch_data_slice(entry).unwrap().iter();
-
-    let data:Vec<u8> = volume_iter.cloned().collect();
-    fs::write(format!("../{}-binary.bin",index).as_str(),data).unwrap();
 }
