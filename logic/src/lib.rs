@@ -22,8 +22,14 @@ pub const VAR_CURRENT_SCORE:TypeVar = type_var_from_u8(3);
 pub const VAR_OBJ_TOUCHED_BORDER:TypeVar = type_var_from_u8(4);
 pub const VAR_OBJ_EDGE:TypeVar = type_var_from_u8(5);
 pub const VAR_EGO_MOTION_DIR:TypeVar = type_var_from_u8(6);
-
+pub const VAR_MAXIMUM_SCORE:TypeVar = type_var_from_u8(7);
+pub const VAR_FREE_PAGES:TypeVar = type_var_from_u8(8);
 pub const VAR_MISSING_WORD:TypeVar = type_var_from_u8(9);
+pub const VAR_TIME_DELAY:TypeVar = type_var_from_u8(10);
+pub const VAR_SECONDS:TypeVar = type_var_from_u8(11);
+pub const VAR_MINUTES:TypeVar = type_var_from_u8(12);
+pub const VAR_HOURS:TypeVar = type_var_from_u8(13);
+pub const VAR_DAYS:TypeVar = type_var_from_u8(14);
 
 pub const VAR_EGO_VIEW:TypeVar = type_var_from_u8(16);
 
@@ -193,6 +199,21 @@ impl Sprite {
         } else {
             self.priority
         }
+    }
+
+    pub fn distance(&self,other:&Sprite) -> u8 {
+        if !self.get_visible() || !other.get_visible() {
+            return 255;
+        }
+
+        let x1:i16=self.get_x().into();
+        let x2:i16=other.get_x().into();
+        let y1:i16=self.get_y().into();
+        let y2:i16=other.get_y().into();
+        
+        let d = (x1-x2).abs().wrapping_add((y1-y2).abs());
+
+        d as u8
     }
 
     pub fn set_active(&mut self,b:bool) {
@@ -425,8 +446,9 @@ pub struct LogicState {
     flag:[bool;256],
     var:[u8;256],
     objects:[Sprite;256],   // overkill, todo add list of active
-    string:[String;256],
-    
+    string:[String;256],    // overkill
+    words:[u16;256],        // overkill
+
     prompt:char,
 
     //input
@@ -467,6 +489,7 @@ impl LogicState {
             var: [0u8;256],
             objects: [Sprite::new();256],
             string: [();256].map(|_| String::new()),
+            words: [0u16;256],
             prompt:'_',
             key_len:0,
             key_buffer:[0;256],
@@ -525,6 +548,34 @@ impl LogicState {
     pub fn is_ego_player_controlled(&self) -> bool {
         self.ego_player_control
     }
+
+    pub fn is_input_enabled(&self) -> bool {
+        self.input
+    }
+    
+    pub fn check_said(&mut self,to_check:&Vec<TypeWord>) -> bool {
+        if !self.get_flag(&FLAG_COMMAND_ENTERED) || self.get_flag(&FLAG_SAID_ACCEPTED_INPUT) {
+            return false;
+        }
+
+        for (index,word) in to_check.iter().enumerate() {
+            // Match any word, but out of words to match against
+            if word.value == 1 && self.words[index]==0 {
+                return false;
+            }
+            // Match remainder of input
+            if word.value == 9999 {
+                break;
+            }
+            // Word does not match
+            if word.value != self.words[index] {
+                return false;
+            }
+        }
+        self.set_flag(&FLAG_SAID_ACCEPTED_INPUT, true);
+        true
+    }
+
     
     pub fn get_mut_string(&mut self,s:&TypeString) -> &mut String {
         &mut self.string[s.value as usize]
@@ -1847,7 +1898,7 @@ impl LogicSequence {
         self.labels.get(goto).map(|b| b.operation_offset)
     }
 
-    fn evaluate_condition_operation(resources:&GameResources,state:&LogicState,op:&ConditionOperation) -> bool {
+    fn evaluate_condition_operation(resources:&GameResources,state:&mut LogicState,op:&ConditionOperation) -> bool {
         match op {
             ConditionOperation::EqualN((var,num)) => state.get_var(var) == state.get_num(num),
             ConditionOperation::EqualV((var1,var2)) => state.get_var(var1) == state.get_var(var2),
@@ -1861,13 +1912,13 @@ impl LogicSequence {
             ConditionOperation::PosN((obj,num1,num2,num3,num4)) => is_left_edge_in_box(resources,state,obj,num1,num2,num3,num4),
             ConditionOperation::Controller(_) => /* TODO */ false,
             ConditionOperation::HaveKey(_) => state.key_len>0,
-            ConditionOperation::Said(_) => /* TODO */ false,
+            ConditionOperation::Said((w,)) => state.check_said(w),
             ConditionOperation::ObjInBox((obj,num1,num2,num3,num4)) => is_left_and_right_edge_in_box(resources,state,obj,num1, num2,num3,num4),
             ConditionOperation::RightPosN(_) => todo!(),
         }
     }
 
-    fn evaluate_condition_or(resources:&GameResources,state:&LogicState,cond:&Vec<LogicChange>) -> bool {
+    fn evaluate_condition_or(resources:&GameResources,state:&mut LogicState,cond:&Vec<LogicChange>) -> bool {
         let mut result = false;
         for a in cond {
             result |= match a {
@@ -1879,7 +1930,7 @@ impl LogicSequence {
         result
     }
 
-    fn evaluate_condition(resources:&GameResources,state:&LogicState,cond:&Vec<LogicChange>) -> bool {
+    fn evaluate_condition(resources:&GameResources,state:&mut LogicState,cond:&Vec<LogicChange>) -> bool {
         let mut result = true;
         for a in cond {
             result &= match a {
@@ -1941,6 +1992,8 @@ impl LogicSequence {
             ActionOperation::SetGameID((m,)) => /* TODO RAGI - if needed */{let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize];println!("TODO : SetGameID {:?}",m);},
             ActionOperation::ConfigureScreen((a,b,c)) => /* TODO RAGI */ { println!("TODO : ConfigureScreen {:?},{:?},{:?}",a,b,c);},
             ActionOperation::SetKey((a,b,c)) => /* TODO RAGI */ { println!("TODO : SetKey {:?},{:?},{:?}",a,b,c);},
+            ActionOperation::Print((m,)) => /* TODO RAGI */ { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; println!("TODO : Print {}",m); },
+            
 
             // Not needed
             ActionOperation::ScriptSize((_num,)) => {/* NO-OP-RAGI */},
@@ -2022,30 +2075,10 @@ impl LogicSequence {
                 let x=state.get_num(num2); 
                 let y=state.get_num(num1); 
                 let max_length = state.get_num(num3) as usize;
-                let mut new_string = state.get_string(s).clone();
-                let mut done = false;
-                for a in 0..state.key_len {
-                    let c = state.key_buffer[a];
-                    match c {
-                        13 => { done=true; break; },
-                        8 => { new_string.pop(); },
-                        b'a'..=b'z' => if new_string.len() < max_length {new_string.push(char::from(c)) },
-                        b'A'..=b'Z' => if new_string.len() < max_length {new_string.push(char::from(c)) },
-                        b'0'..=b'9' => if new_string.len() < max_length {new_string.push(char::from(c)) },
-                        32 => if new_string.len() < max_length {new_string.push(char::from(c)) },
-                        _ => {},
-                    }
-                }
+                let input = state.get_string(s).clone();
+                let (done,new_string) = command_input(state, input, max_length, m, resources, x, y);
 
                 *state.get_mut_string(s)=new_string;
-                // Go through keyboard buffer and append/remove keys?
-
-                let to_show = m.clone()+state.get_string(s).as_str()+state.get_prompt().to_string().as_str();
-                let to_show = to_show + format!("{:indent$}","",indent=(max_length+1) - state.get_string(s).len()).as_str();
-                Self::display_text(resources, state, x, y, &to_show);
-
-                // pull keycodes off buffer and update string, make me a method lalala
-
                 if !done {
                     return Some(pc.user_input());
                 }
@@ -2053,24 +2086,7 @@ impl LogicSequence {
             },
             ActionOperation::Parse((s,)) => {
                 // Todo move to method - remove punctuation (assuming we allow it into here in the first place)
-                let s = state.get_string(s).trim().to_ascii_lowercase();
-                let mut words:Vec<u16>=Vec::new();
-                let mut ok=true;
-                for (index,w) in s.split(' ').enumerate() {
-                    let t = w.trim();
-                    if !t.is_empty() {
-                        match resources.words.get(t) {
-                            None => { state.set_var(&VAR_MISSING_WORD, index as u8); ok=false; break; },    // might want to be 1's based?
-                            Some(0u16) => {},
-                            Some(b) => words.push(*b),
-                        }
-                    }
-                }
-
-                if ok {
-                    state.set_flag(&FLAG_COMMAND_ENTERED,true);
-                    state.set_flag(&FLAG_SAID_ACCEPTED_INPUT,false);
-                }
+                parse_input_string(state, state.get_string(s).clone(), resources);
             }
             ActionOperation::SetCursorChar((m,)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; state.set_prompt(m.chars().next().unwrap()); },
             ActionOperation::IgnoreObjs((obj,)) => state.mut_object(obj).set_observing(false),
@@ -2087,6 +2103,8 @@ impl LogicSequence {
             ActionOperation::ObjectOnWater((obj,)) => state.mut_object(obj).set_restrict_to_water(),
             ActionOperation::Wander((obj,)) => state.mut_object(obj).set_wander(),
             ActionOperation::StartUpdate((obj,)) => state.mut_object(obj).set_frozen(false),
+            ActionOperation::Distance((obj1,obj2,var)) => state.set_var(var,state.object(obj1).distance(state.object(obj2))),
+
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
@@ -2127,6 +2145,50 @@ impl LogicSequence {
         self.interpret_instruction(resources, state, pc, &actions[pc.program_counter].action)
     }
 
+}
+
+pub fn parse_input_string(state: &mut LogicState, s: String, resources: &GameResources) {
+    let s = s.trim().to_ascii_lowercase();
+    let mut ok=true;
+    let mut w_idx=0usize;
+    state.words=[0u16;256];
+    for (index,w) in s.split(' ').enumerate() {
+        let t = w.trim();
+        if !t.is_empty() {
+            match resources.words.get(t) {
+                None => { state.set_var(&VAR_MISSING_WORD, index.saturating_add(1) as u8); ok=false; break; },
+                Some(0u16) => {},
+                Some(b) => { state.words[w_idx]=*b; w_idx+=1; },
+            }
+        }
+    }
+    if ok {
+        state.set_flag(&FLAG_COMMAND_ENTERED,true);
+        state.set_flag(&FLAG_SAID_ACCEPTED_INPUT,false);
+    }
+}
+
+pub fn command_input(state: &mut LogicState, s: String, max_length: usize, m: &String, resources: &GameResources, x: u8, y: u8) -> (bool,String) {
+    let mut new_string = s;
+    let mut done = false;
+    for a in 0..state.key_len {
+        let c = state.key_buffer[a];
+        match c {
+            13 => { done=true; break; },
+            8 => { new_string.pop(); },
+            b'a'..=b'z' => if new_string.len() < max_length {new_string.push(char::from(c)) },
+            b'A'..=b'Z' => if new_string.len() < max_length {new_string.push(char::from(c)) },
+            b'0'..=b'9' => if new_string.len() < max_length {new_string.push(char::from(c)) },
+            32 => if new_string.len() < max_length {new_string.push(char::from(c)) },
+            _ => {},
+        }
+    }
+    // Go through keyboard buffer and append/remove keys?
+    let to_show = m.clone()+new_string.as_str()+state.get_prompt().to_string().as_str();
+    let to_show = to_show + format!("{:indent$}","",indent=(max_length+1) - new_string.len()).as_str();
+    LogicSequence::display_text(resources, state, x, y, &to_show);
+    // pull keycodes off 
+    (done,new_string)
 }
 
 #[derive(Copy,Clone,Debug,Hash,PartialEq,Eq)]
@@ -2283,7 +2345,7 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
     let cell = &cels[c];
 
     let w = cell.get_width() as usize;
-    let h = cell.get_height() as usize;
+    let _h = cell.get_height() as usize;
     let tx:usize = nx.to_num();
     let ty:usize = ny.to_num();
     

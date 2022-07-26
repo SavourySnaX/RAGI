@@ -1,14 +1,14 @@
 
+use std::time::Duration;
 use glow::HasContext;
 use helpers::{conv_rgba, double_pic_width, conv_rgba_transparent};
-use logic::{LogicResource, LogicSequence, LogicState, LogicExecutionPosition, GameResources, render_sprites, update_sprites, VAR_OBJ_TOUCHED_BORDER, VAR_OBJ_EDGE, FLAG_SAID_ACCEPTED_INPUT, FLAG_COMMAND_ENTERED, FLAG_ROOM_FIRST_TIME, FLAG_RESTART_GAME, FLAG_RESTORE_GAME, VAR_CURRENT_ROOM, get_cells, VAR_EGO_MOTION_DIR, OBJECT_EGO, TypeObject, get_direction_from_delta};
+use logic::*;
 
 
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use imgui::*;
 use std::collections::HashMap;
-use std::time::Duration;
 
 struct TexturesUi {
     generated_textures: Vec<TextureId>,
@@ -306,18 +306,24 @@ struct Interpretter {
     pub stack:Vec<LogicExecutionPosition>,
     pub keys:Vec<Keycode>,
     pub breakpoints:HashMap<LogicExecutionPosition,bool>,
+    pub command_input_string:String,
+    pub started:u64     // 1/20 ticks since started, so seconds is divdide this by 20
 }
 
 impl Interpretter {
     pub fn new(base_path:&'static str,version:&str) -> Result<Interpretter,String> {
         let resources = GameResources::new(base_path,version)?;
-        Ok(Interpretter {
+        let mut i = Interpretter {
             resources,
             state: LogicState::new(),
             stack: Vec::new(),
             keys: Vec::new(),
             breakpoints: HashMap::new(),
-        })
+            command_input_string: String::new(),
+            started:0,
+        };
+        i.state.set_var(&VAR_TIME_DELAY,2);
+        Ok(i)
     }
 
     pub fn is_paused(&self) -> bool {
@@ -398,6 +404,7 @@ impl Interpretter {
         let mutable_stack = &mut self.stack;
 
         // delay
+        self.started+=mutable_state.get_var(&VAR_TIME_DELAY) as u64;
         // clear keybuffer
         mutable_state.clear_keys();
 
@@ -410,24 +417,34 @@ impl Interpretter {
             }
         }
 
+        if mutable_state.is_input_enabled() {
+            let (done,new_string) = command_input(mutable_state, self.command_input_string.clone(),20,&String::from(">"),&self.resources,0,22);
+            self.command_input_string = new_string;
+            if done {
+                // parse and clear input string
+                parse_input_string(mutable_state, self.command_input_string.clone(), &self.resources);
+                self.command_input_string.clear();
+            }
+        }
+
         if !resuming {
             // if program.control (EGO dir = var(6))
             // if player.control (var(6) = EGO dir)
             if mutable_state.is_ego_player_controlled() {
 
-                let mut dx=0;
-                let mut dy=0;
+                // emulate walking behaviour
+                let mut d = mutable_state.get_var(&VAR_EGO_MOTION_DIR);
                 for k in &self.keys {
-                    match k {
-                        Keycode::Left => dx=-1,
-                        Keycode::Right => dx=1,
-                        Keycode::Up => dy=-1,
-                        Keycode::Down => dy=1,
-                        _ => {},
+                    d = match k {
+                        Keycode::Left => if d==7 { 0 } else { 7 },
+                        Keycode::Right => if d==3 { 0 } else { 3 },
+                        Keycode::Up => if d==1 { 0 } else { 1 },
+                        Keycode::Down => if d==5 { 0 } else { 5 },
+                        _ => d,
                     }
                 }
 
-                mutable_state.set_var(&VAR_EGO_MOTION_DIR, get_direction_from_delta(dx, dy));
+                mutable_state.set_var(&VAR_EGO_MOTION_DIR, d);
             } else {
                 let d = mutable_state.get_var(&VAR_EGO_MOTION_DIR);
                 mutable_state.mut_object(&OBJECT_EGO).set_direction(d);
@@ -437,6 +454,22 @@ impl Interpretter {
             update_sprites(&self.resources,mutable_state);
 
             // If score has changed(var(3)) or sound has turned off/on (flag(9)), update status line
+            //show VAR_CURRENT_SCORE out of VAR_MAXIMUM_SCORE .... SOUND ON/OFF
+
+            mutable_state.set_var(&VAR_FREE_PAGES,255);
+            let mut since_started = self.started/20;
+            let days = since_started/(60*60*24);
+            since_started%=24*60*60;
+            let hours = since_started/(60*60);
+            since_started%=60*60;
+            let minutes = since_started/(60);
+            since_started%=60;
+            let seconds = since_started;
+
+            mutable_state.set_var(&VAR_DAYS,days as u8);
+            mutable_state.set_var(&VAR_HOURS,hours as u8);
+            mutable_state.set_var(&VAR_MINUTES,minutes as u8);
+            mutable_state.set_var(&VAR_SECONDS,seconds as u8);
         }
         
         loop {
