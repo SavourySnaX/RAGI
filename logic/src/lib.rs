@@ -1914,7 +1914,7 @@ impl LogicSequence {
             ConditionOperation::HaveKey(_) => state.key_len>0,
             ConditionOperation::Said((w,)) => state.check_said(w),
             ConditionOperation::ObjInBox((obj,num1,num2,num3,num4)) => is_left_and_right_edge_in_box(resources,state,obj,num1, num2,num3,num4),
-            ConditionOperation::RightPosN(_) => todo!(),
+            ConditionOperation::RightPosN((obj,num1,num2,num3,num4)) => is_right_edge_in_box(resources,state,obj,num1,num2,num3,num4),
         }
     }
 
@@ -2104,7 +2104,11 @@ impl LogicSequence {
             ActionOperation::Wander((obj,)) => state.mut_object(obj).set_wander(),
             ActionOperation::StartUpdate((obj,)) => state.mut_object(obj).set_frozen(false),
             ActionOperation::Distance((obj1,obj2,var)) => state.set_var(var,state.object(obj1).distance(state.object(obj2))),
-
+            ActionOperation::ReleasePriority((obj,)) => { state.mut_object(obj).set_priority_auto(); },
+            ActionOperation::PlayerControl(()) => state.set_player_control(),
+            ActionOperation::AddToPic((num1,num2,num3,num4,num5,num6,num7)) => {
+                /* todo */
+            },
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
