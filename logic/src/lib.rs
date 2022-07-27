@@ -44,12 +44,20 @@ pub const FLAG_RESTORE_GAME:TypeFlag = type_flag_from_u8(12);
 type FP16=FixedU16<U8>;
 type FP32=FixedI32<U8>;
 
-#[derive(Debug,Copy,Clone)] // TODO revisit copy
+#[derive(Debug)]
+pub enum SpriteMotion {
+    Normal,
+    Wander,
+    MoveObj,
+}
+
+#[derive(Debug)] // TODO revisit copy
 pub struct Sprite {
     active:bool,    // object is processed
     moved:bool,     // object moved last tick
     frozen:bool,    // object ignores updates (animation/etc)
     visible:bool,   // draw to screen (draw/erase, to confirm if this is automated (sprite), or blit)
+    motion:bool,    // movement is applied
     observing:bool,         // treats other objects as obstacles
     ignore_barriers:bool,   // ignores pixels of priority and block set with block_command
     ignore_horizon:bool,    // ignores horizon position during movement
@@ -59,8 +67,7 @@ pub struct Sprite {
     cycle:bool,     // cycle loop automatically
     one_shot:bool,  // runs until end of current loop, and triggers flag
     reverse:bool,   // reverses the order of animation 
-    move_obj:bool,  // indicates the object has been told to move to a dest point
-    wander:bool,    // object should move about randomly
+    motion_kind:SpriteMotion,
     direction:u8,   // current direction of travel (0-stop, 1-N, 2-NE, 3-E, ... 8-NW)
     view:u8,
     cloop:u8,
@@ -88,6 +95,7 @@ impl Sprite {
             moved: false,
             frozen: false,
             visible: false,
+            motion: false,
             observing: false, 
             ignore_barriers: false,
             ignore_horizon: false,
@@ -97,8 +105,7 @@ impl Sprite {
             cycle: true, 
             one_shot: false,
             reverse: false,
-            move_obj: false,
-            wander: false,
+            motion_kind: SpriteMotion::Normal,
             direction: 0,
             view: 0, 
             cloop: 0,
@@ -142,6 +149,10 @@ impl Sprite {
         self.visible
     }
     
+    pub fn is_restricted_by_blocks(&self) -> bool {
+        self.observing
+    }
+
     pub fn is_restricted_to_land(&self) -> bool {
         self.restrict_to_land
     }
@@ -178,6 +189,10 @@ impl Sprite {
         self.ey
     }
     
+    pub fn get_motion_kind(&self) -> &SpriteMotion {
+        &self.motion_kind
+    }
+
     pub fn get_priority(&self) -> u8 {
         if self.priority == 0 {
             // Automatic priority
@@ -317,8 +332,8 @@ impl Sprite {
     }
 
     pub fn set_move(&mut self,x:u8,y:u8,s:u8,f:&TypeFlag) {
-        self.wander=false;
-        self.move_obj=true;
+        self.set_enable_motion(true);   // to confirm
+        self.motion_kind=SpriteMotion::MoveObj;
         self.ex=FP16::from_num(x);
         self.ey=FP16::from_num(y);
         self.move_flag= *f;
@@ -326,7 +341,7 @@ impl Sprite {
     }
 
     pub fn clear_move(&mut self) {
-        self.move_obj=false;
+        self.motion_kind=SpriteMotion::Normal;
     }
 
     pub fn adjust_x_via_delta(&mut self,dx:u8) {
@@ -354,8 +369,17 @@ impl Sprite {
     }
 
     pub fn set_wander(&mut self) {
-        self.wander=true;
-        self.move_obj=false;
+        self.motion_kind=SpriteMotion::Wander;
+        self.set_enable_motion(true);   // to confirm
+    }
+
+    pub fn set_normal_motion(&mut self) {
+        self.motion_kind=SpriteMotion::Normal;
+        self.set_enable_motion(true);   // to confirm
+    }
+
+    pub fn set_enable_motion(&mut self,b:bool) {
+        self.motion=b;
     }
 }
 
@@ -487,7 +511,7 @@ impl LogicState {
             horizon: 0,
             flag: [false;256],
             var: [0u8;256],
-            objects: [Sprite::new();256],
+            objects: [();256].map(|_| Sprite::new()),
             string: [();256].map(|_| String::new()),
             words: [0u16;256],
             prompt:'_',
@@ -552,7 +576,7 @@ impl LogicState {
     pub fn is_input_enabled(&self) -> bool {
         self.input
     }
-    
+ 
     pub fn check_said(&mut self,to_check:&Vec<TypeWord>) -> bool {
         if !self.get_flag(&FLAG_COMMAND_ENTERED) || self.get_flag(&FLAG_SAID_ACCEPTED_INPUT) {
             return false;
@@ -974,6 +998,11 @@ pub enum ActionOperation {
     TraceInfo((TypeNum,TypeNum,TypeNum)),
     PrintAtV0((TypeMessage,TypeNum,TypeNum)),
     PrintAtV1((TypeMessage,TypeNum,TypeNum,TypeNum)),
+    SetMenu((TypeMessage,)),
+    SetMenuMember((TypeMessage,TypeController)),
+    SubmitMenu(()),
+    DisableMember((TypeController,)),
+    MenuInput(()),
     Goto((TypeGoto,)),
     If((Vec<LogicChange>,TypeGoto)),
 }
@@ -1218,6 +1247,8 @@ impl LogicResource {
             ActionOperation::InitJoy(_) |
             ActionOperation::ToggleMonitor(_) |
             ActionOperation::ShowPriScreen(_) |
+            ActionOperation::SubmitMenu(_) |
+            ActionOperation::MenuInput(_) |
             ActionOperation::Version(_) => String::new(),
             ActionOperation::Increment(a) |
             ActionOperation::Decrement(a) |
@@ -1273,10 +1304,12 @@ impl LogicResource {
             ActionOperation::Get(a) |
             ActionOperation::Drop(a) => Self::param_dis_item(&a.0, items),
             ActionOperation::Print(a) |
+            ActionOperation::SetMenu(a) |
             ActionOperation::SetCursorChar(a) |
             ActionOperation::Log(a) |
             ActionOperation::SetGameID(a) => self.param_dis_message(&a.0),
             ActionOperation::Parse(a) => Self::param_dis_string(&a.0),
+            ActionOperation::DisableMember(a) => Self::param_dis_controller(&a.0),
             ActionOperation::SetTextAttribute(a) => format!("{},{}",Self::param_dis_num(&a.0),Self::param_dis_num(&a.1)),
             ActionOperation::Sound(a) => format!("{},{}",Self::param_dis_num(&a.0),Self::param_dis_flag(&a.1)),
             ActionOperation::AddN(a) |
@@ -1309,6 +1342,7 @@ impl LogicResource {
             ActionOperation::ReverseLoop(a) => format!("{},{}",Self::param_dis_object(&a.0),Self::param_dis_flag(&a.1)),
             ActionOperation::SetString(a) => format!("{},{}",Self::param_dis_string(&a.0),self.param_dis_message(&a.1)),
             ActionOperation::GetNum(a) => format!("{},{}",self.param_dis_message(&a.0),Self::param_dis_var(&a.1)),
+            ActionOperation::SetMenuMember(a) => format!("{},{}",self.param_dis_message(&a.0),Self::param_dis_controller(&a.1)),
             ActionOperation::ClearLines(a) |
             ActionOperation::TraceInfo(a) |
             ActionOperation::ConfigureScreen(a) => format!("{},{},{}",Self::param_dis_num(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2)),
@@ -1553,6 +1587,10 @@ impl LogicSequence {
     fn parse_message_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeMessage,TypeVar), &'static str> {
         Ok((Self::parse_message(iter)?,Self::parse_var(iter)?))
     }
+    
+    fn parse_message_controller(iter:&mut std::slice::Iter<u8>) -> Result<(TypeMessage,TypeController), &'static str> {
+        Ok((Self::parse_message(iter)?,Self::parse_controller(iter)?))
+    }
 
     fn parse_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum,TypeNum), &'static str> {
         Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?))
@@ -1709,6 +1747,11 @@ impl LogicSequence {
             let action = match b {
                 0xFF => ActionOperation::If(Self::parse_vlogic_change_goto(&mut iter)?),
                 0xFE => ActionOperation::Goto((Self::parse_goto(&mut iter)?,)),
+                0xA1 => ActionOperation::MenuInput(()),
+                0xA0 => ActionOperation::DisableMember((Self::parse_controller(&mut iter)?,)),
+                0x9E => ActionOperation::SubmitMenu(()),
+                0x9D => ActionOperation::SetMenuMember(Self::parse_message_controller(&mut iter)?),
+                0x9C => ActionOperation::SetMenu((Self::parse_message(&mut iter)?,)),
                 0x97 => if version == "2.089" {ActionOperation::PrintAtV0(Self::parse_message_num_num(&mut iter)?) } else {panic!("DAMN")},
                 0x96 => ActionOperation::TraceInfo(Self::parse_num_num_num(&mut iter)?),
                 0x94 => ActionOperation::RepositionToV(Self::parse_object_var_var(&mut iter)?),
@@ -1951,7 +1994,11 @@ impl LogicSequence {
         for (_,obj) in state.mut_active_objects() {
             obj.set_active(false);
             obj.set_visible(false);
-            //obj.reset();  (may not be needed)
+            obj.set_normal_motion();
+            obj.set_direction(0);
+            obj.set_cycling(true);
+            obj.set_priority_auto();
+            //obj.reset();//  (may not be needed)
         }
         //destroy all resources
         state.set_player_control();
@@ -1970,10 +2017,10 @@ impl LogicSequence {
 
         match state.get_var(&VAR_EGO_EDGE) {
             0 => {},
-            1 => state.mut_object(&OBJECT_EGO).set_y(167),
-            2 => state.mut_object(&OBJECT_EGO).set_x(1),
-            3 => state.mut_object(&OBJECT_EGO).set_y(37+cell.get_height()),
-            4 => state.mut_object(&OBJECT_EGO).set_x(160-cell.get_width()),
+            1 => state.mut_object(&OBJECT_EGO).set_y(PIC_HEIGHT_U8-1),
+            2 => state.mut_object(&OBJECT_EGO).set_x(0),
+            3 => state.mut_object(&OBJECT_EGO).set_y(36+cell.get_height()),
+            4 => state.mut_object(&OBJECT_EGO).set_x(PIC_WIDTH_U8-cell.get_width()),
             _ => panic!("Invalid edge in EGO EDGE"),
         }
 
@@ -1993,6 +2040,10 @@ impl LogicSequence {
             ActionOperation::ConfigureScreen((a,b,c)) => /* TODO RAGI */ { println!("TODO : ConfigureScreen {:?},{:?},{:?}",a,b,c);},
             ActionOperation::SetKey((a,b,c)) => /* TODO RAGI */ { println!("TODO : SetKey {:?},{:?},{:?}",a,b,c);},
             ActionOperation::Print((m,)) => /* TODO RAGI */ { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; println!("TODO : Print {}",m); },
+            ActionOperation::PrintV((var,)) => /* TODO RAGI */ { let m=&TypeMessage::from(state.get_var(var)); let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; println!("TODO : PrintV {}",m); },
+            ActionOperation::AddToPic((num1,num2,num3,num4,num5,num6,num7)) => /* TODO RAGI */ {
+                println!("TODO - AddToPic {:?},{:?},{:?},{:?},{:?},{:?},{:?}",num1,num2,num3,num4,num5,num6,num7);
+            },
             
 
             // Not needed
@@ -2026,7 +2077,6 @@ impl LogicSequence {
             ActionOperation::StopCycling((obj,)) => state.mut_object(obj).set_cycling(false),
             ActionOperation::PreventInput(()) => state.set_input(false),
             ActionOperation::SetHorizon((num,)) => state.set_horizon(state.get_num(num)),
-            ActionOperation::Position((obj,num1,num2)) => { let x=state.get_num(num1); let y=state.get_num(num2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
             ActionOperation::Reposition((obj,var1,var2)) => {let dx=state.get_var(var1); let dy=state.get_var(var2); state.mut_object(obj).adjust_x_via_delta(dx); state.mut_object(obj).adjust_y_via_delta(dy); },
             ActionOperation::SetPriority((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_priority(n); },
             ActionOperation::SetLoop((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_loop(n); },
@@ -2106,9 +2156,24 @@ impl LogicSequence {
             ActionOperation::Distance((obj1,obj2,var)) => state.set_var(var,state.object(obj1).distance(state.object(obj2))),
             ActionOperation::ReleasePriority((obj,)) => { state.mut_object(obj).set_priority_auto(); },
             ActionOperation::PlayerControl(()) => state.set_player_control(),
-            ActionOperation::AddToPic((num1,num2,num3,num4,num5,num6,num7)) => {
-                /* todo */
+            ActionOperation::LastCel((obj,var)) => { let cels = get_cells(resources,state.object(obj)); state.set_var(var,(cels.len()-1) as u8); },
+            ActionOperation::SetCelV((obj,var)) => { let n=state.get_var(var); state.mut_object(obj).set_cel(n); },
+            ActionOperation::StopMotion((obj,)) => state.mut_object(obj).set_enable_motion(false),
+            ActionOperation::NormalMotion((obj,)) => state.mut_object(obj).set_normal_motion(),
+            ActionOperation::StartMotion((obj,)) => state.mut_object(obj).set_enable_motion(true),
+            ActionOperation::AddN((var,num)) => state.set_var(var,state.get_var(var).wrapping_add(state.get_num(num))),
+            ActionOperation::SubN((var,num)) => state.set_var(var,state.get_var(var).wrapping_sub(state.get_num(num))),
+            ActionOperation::MoveObjV((obj,var1,var2,var3,flag)) => { 
+                let x=state.get_var(var1); let y=state.get_var(var2); let s=state.get_var(var3); 
+                state.mut_object(obj).set_move(x, y, s, flag);
+                if *obj==OBJECT_EGO {
+                    state.set_program_control();
+                }
             },
+            // TODO investigate, Position and RepositionTo act the same, should they
+            ActionOperation::Position((obj,num1,num2)) => { let x=state.get_num(num1); let y=state.get_num(num2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
+            ActionOperation::RepositionToV((obj,var1,var2)) => {let x=state.get_var(var1); let y=state.get_var(var2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
+            ActionOperation::PositionV((obj,var1,var2)) => { let x=state.get_var(var1); let y=state.get_var(var2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
@@ -2283,25 +2348,30 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
         if !(state.object(obj_num).visible && !state.object(obj_num).frozen) {
             continue;
         }
-        if state.object(obj_num).move_obj {
-            let x=FP32::from(state.object(obj_num).get_x_fp16());
-            let y=FP32::from(state.object(obj_num).get_y_fp16());
-            let ex=FP32::from(state.object(obj_num).get_end_x());
-            let ey=FP32::from(state.object(obj_num).get_end_y());
-            let dx = (ex-x).signum();
-            let dy = (ey-y).signum();
-            let direction = get_direction_from_delta(dx.to_num(), dy.to_num());
-            state.mut_object(obj_num).set_direction(direction);
-            if direction==0 {
-                let mflag = state.object(obj_num).move_flag;
-                state.set_flag(&mflag, true);
-                state.mut_object(obj_num).clear_move();
-            }
 
-        } else if state.object(obj_num).wander && !state.object(obj_num).has_moved() {
-            // only changes direction if didn't move last update
-            let direction = state.rng.gen_range(0u8..=8);
-            state.mut_object(obj_num).set_direction(direction);
+        match state.object(obj_num).get_motion_kind() {
+            SpriteMotion::Normal => {}, // what ever is in direction is used
+            SpriteMotion::Wander => {   // update direction randomly, if didn't move last time
+                if !state.object(obj_num).has_moved() {
+                    let direction = state.rng.gen_range(0u8..=8);
+                    state.mut_object(obj_num).set_direction(direction);
+                }
+            },
+            SpriteMotion::MoveObj => {
+                let x=FP32::from(state.object(obj_num).get_x_fp16());
+                let y=FP32::from(state.object(obj_num).get_y_fp16());
+                let ex=FP32::from(state.object(obj_num).get_end_x());
+                let ey=FP32::from(state.object(obj_num).get_end_y());
+                let dx = (ex-x).signum();
+                let dy = (ey-y).signum();
+                let direction = get_direction_from_delta(dx.to_num(), dy.to_num());
+                state.mut_object(obj_num).set_direction(direction);
+                if direction==0 {
+                    let mflag = state.object(obj_num).move_flag;
+                    state.set_flag(&mflag, true);
+                    state.mut_object(obj_num).clear_move();
+                }
+            },
         }
 
         if state.object(obj_num).get_direction()!=0 {
@@ -2332,6 +2402,9 @@ fn update_edge(state:&mut LogicState,obj_num:&TypeObject,edge:u8) {
 pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeObject) -> (bool,FP16,FP16) {
 
     let obj=state.object(&obj_num);
+    if !obj.motion {
+        return (false,FP16::ZERO,FP16::ZERO);
+    }
     let (dx,dy) = get_delta_fp32_from_direction(obj.get_direction());
     let x=FP32::from(obj.get_x_fp16());
     let y=FP32::from(obj.get_y_fp16());
@@ -2379,7 +2452,7 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
             return (false,FP16::ZERO,FP16::ZERO);
         }
     }
-    // todo checks for other control codes (0,1,2)
+    // todo checks for other block and sprites?
 
     // scan x+0..x+width-1 and confirm priority as expected
 
@@ -2395,7 +2468,9 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
             return (false,FP16::ZERO,FP16::ZERO);
         }
         if pri == 1 {
-            println!("Todo - conditional block");
+            if obj.is_restricted_by_blocks() {
+                return (false,FP16::ZERO,FP16::ZERO);
+            }
         }
         if pri == 2 {
             println!("Todo - trigger?")
@@ -2502,8 +2577,8 @@ pub fn render_sprites(resources:&GameResources,state:&mut LogicState, disable_ba
             if !state.object(&obj_num).fixed_loop {
                 let loops = get_loops(resources, state.object(&obj_num));
                 match loops.len() {
-                    0 => {},    // Do nothing
-                    1..=3 => {
+                    0..=1 => {},    // Do nothing
+                    2..=3 => {
                         let direction = state.object(&obj_num).get_direction();
                         match direction {
                             0..=1 | 5 => {}, // Do nothing
@@ -2526,6 +2601,9 @@ pub fn render_sprites(resources:&GameResources,state:&mut LogicState, disable_ba
                     _ => panic!("Unsupported loop count in auto loop {}",loops.len()),
                 }
             }
+
+            // update cells in case we have switched loop
+            let cels = get_cells(resources, state.object(&obj_num));
 
             if state.object(&obj_num).one_shot || state.object(&obj_num).cycle {
                 let ccel = state.object(&obj_num).get_cel();
@@ -2567,7 +2645,7 @@ fn render_sprite(obj_num:&TypeObject, cell: &view::ViewCel, state: &mut LogicSta
             let col = if mirror {d[(w-xx-1)+yy*w]} else {d[xx+yy*w] };
             if col != t {
                 let sx = xx+x;
-                let sy=yy+y-h;
+                let sy = yy+y-h;
                 let pri = fetch_priority_for_pixel_rendering(state,sx,sy);
                 if pri <= state.object(obj_num).get_priority() {
                     // We double the pixels of sprites at this point
