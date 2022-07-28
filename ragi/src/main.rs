@@ -5,6 +5,7 @@ use helpers::{conv_rgba, double_pic_width, conv_rgba_transparent};
 use logic::*;
 
 
+use picture::{PIC_HEIGHT_USIZE, PIC_WIDTH_USIZE};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use imgui::*;
@@ -101,8 +102,8 @@ impl TexturesUi {
 
 fn main() -> Result<(), String> {
 
-    //let mut interpretter=Interpretter::new("../images/King's Quest v1.0U (1986)(Sierra On-Line, Inc.) [Adventure][!]/","2.272").unwrap();
-    let mut interpretter=Interpretter::new("../images/Leisure Suit Larry in the Land of the Lounge Lizards (1987)(Sierra On-Line, Inc.) [Adventure]/","2.440").unwrap();
+    let mut interpretter=Interpretter::new("../images/King's Quest v1.0U (1986)(Sierra On-Line, Inc.) [Adventure][!]/","2.272").unwrap();
+    //let mut interpretter=Interpretter::new("../images/Leisure Suit Larry in the Land of the Lounge Lizards (1987)(Sierra On-Line, Inc.) [Adventure]/","2.440").unwrap();
     //let mut interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/","2.089").unwrap();
 
     let sdl_context = sdl2::init()?;
@@ -135,8 +136,10 @@ fn main() -> Result<(), String> {
 
     let textures_ui = TexturesUi::new(&gl,&mut textures,64);
 
-    //interpretter.breakpoints.insert(LogicExecutionPosition::new(2,0), false);
+    interpretter.breakpoints.insert(LogicExecutionPosition::new(53,145), false);
 
+    let live_debug_view=false;
+    let mut debug_texture_index:usize=0;
     let mut resume=false;
     let mut step=false;
     'running: loop {
@@ -198,15 +201,50 @@ fn main() -> Result<(), String> {
                     let width = cell.get_width() as usize;
                     let width = width * 2;
                     let height = cell.get_height() as _;
-                    textures_ui.update(&gl, index+1, width, height, &rgb);
-                    Image::new(textures_ui.get_generated_texture(index+1),[width as f32,height as f32]).build(&ui);
+                    textures_ui.update(&gl, index+10, width, height, &rgb);
+                    Image::new(textures_ui.get_generated_texture(index+10),[width as f32,height as f32]).build(&ui);
                     ui.text_wrapped(format!("{:?}",obj));
                 });
             }
         });
 
+        Window::new("BG_DEBUG").build(&ui, || {
+            ui.combo_simple_string("Texture", &mut debug_texture_index, &["picture_buffer","priority_buffer","back_buffer","text_buffer","gfx_buffer"]);
+
+            match debug_texture_index {
+                0 => {
+                    let d = double_pic_width(interpretter.state.picture());
+                    let d = conv_rgba(&d);
+                    textures_ui.update(&gl, 1, PIC_WIDTH_USIZE*2, PIC_HEIGHT_USIZE, &d);
+                    Image::new(textures_ui.get_generated_texture(1),[(PIC_WIDTH_USIZE*2) as f32,PIC_HEIGHT_USIZE as f32]).build(&ui);
+                },
+                1 => {
+                    let d = double_pic_width(interpretter.state.priority());
+                    let d = conv_rgba(&d);
+                    textures_ui.update(&gl, 1, PIC_WIDTH_USIZE*2, PIC_HEIGHT_USIZE, &d);
+                    Image::new(textures_ui.get_generated_texture(1),[(PIC_WIDTH_USIZE*2) as f32,PIC_HEIGHT_USIZE as f32]).build(&ui);
+                },
+                2 => {
+                    let d = conv_rgba(interpretter.state.back_buffer());
+                    textures_ui.update(&gl, 2, SCREEN_WIDTH_USIZE, SCREEN_HEIGHT_USIZE, &d);
+                    Image::new(textures_ui.get_generated_texture(2),[SCREEN_WIDTH_USIZE as f32,SCREEN_HEIGHT_USIZE as f32]).build(&ui);
+                },
+                3 => {
+                    let d = conv_rgba(interpretter.state.text_buffer());
+                    textures_ui.update(&gl, 2, SCREEN_WIDTH_USIZE, SCREEN_HEIGHT_USIZE, &d);
+                    Image::new(textures_ui.get_generated_texture(2),[SCREEN_WIDTH_USIZE as f32,SCREEN_HEIGHT_USIZE as f32]).build(&ui);
+                },
+                4 => {
+                    let d = conv_rgba(interpretter.state.screen_buffer());
+                    textures_ui.update(&gl, 2, SCREEN_WIDTH_USIZE, SCREEN_HEIGHT_USIZE, &d);
+                    Image::new(textures_ui.get_generated_texture(2),[SCREEN_WIDTH_USIZE as f32,SCREEN_HEIGHT_USIZE as f32]).build(&ui);
+                },
+                _ => {},
+            }
+        });
+
         Window::new("LOGIC").build(&ui, || {
-            if interpretter.is_paused() {
+            if (live_debug_view || interpretter.is_paused()) && !interpretter.stack.is_empty() {
                 let top_of_stack = &interpretter.stack[interpretter.stack.len()-1];
                 let file = top_of_stack.get_logic();
                 let logic = interpretter.resources.logic.get(&file);
@@ -238,7 +276,7 @@ fn main() -> Result<(), String> {
         });
 
         Window::new("FLAGS").build(&ui, || {
-            if interpretter.is_paused() {
+            if live_debug_view || interpretter.is_paused() {
                 for (index,f) in interpretter.state.get_flags().enumerate() {
                     if f {
                         ui.text(format!("{:3} : {}", index, f));
@@ -248,7 +286,7 @@ fn main() -> Result<(), String> {
         });
 
         Window::new("VARS").build(&ui, || {
-            if interpretter.is_paused() {
+            if live_debug_view || interpretter.is_paused() {
                 for (index,v) in interpretter.state.get_vars().enumerate() {
                     if v!=0 {
                         ui.text(format!("{:3} : {}", index, v));
@@ -258,7 +296,7 @@ fn main() -> Result<(), String> {
         });
         
         Window::new("STRINGS").build(&ui, || {
-            if interpretter.is_paused() {
+            if live_debug_view || interpretter.is_paused() {
                 for (index,s) in interpretter.state.get_strings().enumerate() {
                     if !s.is_empty() {
                         ui.text(format!("{:3} : {}", index, s));
@@ -269,7 +307,7 @@ fn main() -> Result<(), String> {
 
 
         Window::new("STACK").build(&ui, || {
-            if interpretter.is_paused() {
+            if live_debug_view || interpretter.is_paused() {
                 for a in (&interpretter.stack).into_iter().rev() {
                     ui.text(format!("Logic : {} | PC : {}", a.get_logic(),a.get_pc()));
                 }
@@ -452,6 +490,7 @@ impl Interpretter {
             // For all objects wich animate.obj,start_update and draw
             //  recaclc dir of movement
             update_sprites(&self.resources,mutable_state);
+            update_anims(&self.resources,mutable_state);
 
             // If score has changed(var(3)) or sound has turned off/on (flag(9)), update status line
             //show VAR_CURRENT_SCORE out of VAR_MAXIMUM_SCORE .... SOUND ON/OFF
@@ -481,7 +520,7 @@ impl Interpretter {
             
             Self::call(&mut self.breakpoints,&self.resources,mutable_stack,mutable_state, 0, &self.resources.logic,resume,single_step);
             if !mutable_stack.is_empty() {
-                return;
+                break;
             } else {
                 resuming=false;
             }

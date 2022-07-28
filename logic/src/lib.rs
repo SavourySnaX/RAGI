@@ -13,6 +13,9 @@ use words::Words;
 
 use strum_macros::IntoStaticStr;
 
+pub const SCREEN_WIDTH_USIZE:usize = 320;
+pub const SCREEN_HEIGHT_USIZE:usize = 200;
+
 pub const OBJECT_EGO:TypeObject = type_object_from_u8(0);
 
 pub const VAR_CURRENT_ROOM:TypeVar = type_var_from_u8(0);
@@ -541,9 +544,6 @@ pub struct LogicState {
 
 }
 
-const SCREEN_WIDTH_USIZE:usize = 320;
-const SCREEN_HEIGHT_USIZE:usize = 200;
-
 impl Default for LogicState {
     fn default() -> Self {
         Self::new()
@@ -783,6 +783,14 @@ impl LogicState {
 
     pub fn back_buffer(&self) -> &[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
         &self.back_buffer
+    }
+
+    pub fn text_buffer(&self) -> &[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
+        &self.text_buffer
+    }
+
+    pub fn screen_buffer(&self) -> &[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
+        &self.post_sprites
     }
 
     pub fn final_buffer(&self) -> &[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
@@ -2754,18 +2762,11 @@ pub fn get_cells<'a>(resources:&'a GameResources,obj:&Sprite) -> &'a Vec<ViewCel
     cloop.get_cels()
 }
 
-pub fn render_sprites(resources:&GameResources,state:&mut LogicState, disable_background:bool) {
-    state.post_sprites = if disable_background {[0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]} else {state.back_buffer};
-
-    for num in state.active_objects_indices_sorted_y() {
+pub fn update_anims(resources:&GameResources,state:&mut LogicState) {
+    for num in state.active_objects_indices() {
         let obj_num = TypeObject::from(num as u8);
         let c = usize::from(state.object(&obj_num).get_cel());
         let cels = get_cells(resources, state.object(&obj_num));
-        let cell = &cels[c];
-
-        if state.object(&obj_num).visible {
-            render_sprite(&obj_num, cell, state);
-        }
 
         if !state.object(&obj_num).frozen {
             if !state.object(&obj_num).fixed_loop {
@@ -2829,6 +2830,21 @@ pub fn render_sprites(resources:&GameResources,state:&mut LogicState, disable_ba
         }
     }
 
+}
+
+pub fn render_sprites(resources:&GameResources,state:&mut LogicState, disable_background:bool) {
+    state.post_sprites = if disable_background {[0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]} else {state.back_buffer};
+
+    for num in state.active_objects_indices_sorted_y() {
+        let obj_num = TypeObject::from(num as u8);
+        let c = usize::from(state.object(&obj_num).get_cel());
+        let cels = get_cells(resources, state.object(&obj_num));
+        let cell = &cels[c];
+
+        if state.object(&obj_num).visible {
+            render_sprite(&obj_num, cell, state);
+        }
+    }
 }
 
 fn render_view_to_pic(resources: &GameResources, state:&mut LogicState, view:u8, cloop:u8, cel:u8, x:usize, y:usize, rpri:u8, margin:u8) {
