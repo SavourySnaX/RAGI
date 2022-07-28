@@ -80,6 +80,10 @@ pub struct Sprite {
     ex:FP16,
     ey:FP16,
     step_size:FP16,
+    step_time:u8,
+    step_cnt:u8,
+    cycle_time:u8,
+    cycle_cnt:u8,
 }
 
 impl Default for Sprite {
@@ -118,6 +122,10 @@ impl Sprite {
             ex: FP16::from_num(0),
             ey: FP16::from_num(0),
             step_size: FP16::from_bits(4<<6),
+            step_time: 1,
+            step_cnt: 0,
+            cycle_time: 1,
+            cycle_cnt: 0,
         }
     }
 
@@ -231,6 +239,30 @@ impl Sprite {
         d as u8
     }
 
+    pub fn should_step(&mut self) -> bool {
+        self.step_cnt+=1;
+        if self.step_cnt >= self.step_time 
+        {
+            self.step_cnt=0;
+            true
+        }
+        else {
+            false
+        }
+    }
+    
+    pub fn should_cycle(&mut self) -> bool {
+        self.cycle_cnt+=1;
+        if self.cycle_cnt >= self.cycle_time 
+        {
+            self.cycle_cnt=0;
+            true
+        }
+        else {
+            false
+        }
+    }
+
     pub fn set_active(&mut self,b:bool) {
         self.active=b;
     }
@@ -278,6 +310,17 @@ impl Sprite {
         }
     }
 
+    pub fn set_step_time(&mut self,n:u8) {
+        self.step_time=n;
+        self.step_cnt=0;
+    }
+    
+    pub fn set_cycle_time(&mut self,n:u8) {
+        self.cycle_time=n;
+        self.cycle_cnt=0;
+    }
+
+
     pub fn set_x(&mut self,n:u8) {
         self.x = FP16::from_num(n);
     }
@@ -308,6 +351,10 @@ impl Sprite {
     
     pub fn set_cel(&mut self,n:u8) {
         self.cel = n;
+    }
+
+    pub fn set_fixed_loop(&mut self,b:bool) {
+        self.fixed_loop = b;
     }
 
     pub fn set_one_shot(&mut self,f:&TypeFlag) {
@@ -473,7 +520,11 @@ pub struct LogicState {
     string:[String;256],    // overkill
     words:[u16;256],        // overkill
 
+    num_string:String,
     prompt:char,
+
+    ink:u8,     // colours for display/get_string/get_num
+    paper:u8,
 
     //input
     key_len:usize,
@@ -514,7 +565,10 @@ impl LogicState {
             objects: [();256].map(|_| Sprite::new()),
             string: [();256].map(|_| String::new()),
             words: [0u16;256],
+            num_string: String::from(""),
             prompt:'_',
+            ink:15,
+            paper:0,
             key_len:0,
             key_buffer:[0;256],
             video_buffer:[15;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
@@ -545,6 +599,10 @@ impl LogicState {
         v.value
     }
 
+    pub fn get_controller(&self,c:&TypeController) -> u8 {
+        c.value
+    }
+
     pub fn get_new_room(&self) -> u8 {
         self.new_room
     }
@@ -557,12 +615,24 @@ impl LogicState {
         self.string.iter()
     }
 
+    pub fn get_num_string(&self) -> &String {
+        &self.num_string
+    }
+
     pub fn get_string(&self,s:&TypeString) -> &String {
         &self.string[s.value as usize]
     }
 
     pub fn get_prompt(&self) -> char {
         self.prompt
+    }
+
+    pub fn get_ink(&self) -> u8 {
+        self.ink
+    }
+
+    pub fn get_paper(&self) -> u8 {
+        self.paper
     }
 
     pub fn is_text_mode(&self) -> bool {
@@ -600,7 +670,10 @@ impl LogicState {
         true
     }
 
-    
+    pub fn mut_num_string(&mut self) -> &mut String {
+        &mut self.num_string
+    }
+
     pub fn get_mut_string(&mut self,s:&TypeString) -> &mut String {
         &mut self.string[s.value as usize]
     }
@@ -623,6 +696,14 @@ impl LogicState {
     
     pub fn set_prompt(&mut self,c:char) {
         self.prompt = c;
+    }
+
+    pub fn set_ink(&mut self,ink:u8) {
+        self.ink=ink;
+    }
+
+    pub fn set_paper(&mut self,paper:u8) {
+        self.paper=paper;
     }
 
     pub fn set_input(&mut self,b:bool) {
@@ -690,6 +771,11 @@ impl LogicState {
     pub fn picture(&self) -> &[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
         &self.video_buffer
     }
+    
+    pub fn mut_picture(&mut self) -> &mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
+        &mut self.video_buffer
+    }
+    
     
     pub fn priority(&self) -> &[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
         &self.priority_buffer
@@ -841,10 +927,12 @@ pub enum ConditionOperation {
     IsSet((TypeFlag,)),
     IsSetV((TypeVar,)),
     Has((TypeItem,)),
+    ObjInRoom((TypeItem,TypeVar)),
     PosN((TypeObject,TypeNum,TypeNum,TypeNum,TypeNum)),
     Controller((TypeController,)),
     HaveKey(()),
     Said((Vec<TypeWord>,)),
+    CompareStrings((TypeString,TypeString)),
     ObjInBox((TypeObject,TypeNum,TypeNum,TypeNum,TypeNum)),
     RightPosN((TypeObject,TypeNum,TypeNum,TypeNum,TypeNum)),
 }
@@ -879,6 +967,7 @@ pub enum ActionOperation {
     NewRoom((TypeNum,)),
     NewRoomV((TypeVar,)),
     LoadLogic((TypeNum,)),
+    LoadLogicV((TypeVar,)),
     Call((TypeNum,)),
     CallV((TypeVar,)),
     LoadPic((TypeVar,)),
@@ -922,6 +1011,7 @@ pub enum ActionOperation {
     SetHorizon((TypeNum,)),
     ObjectOnWater((TypeObject,)),
     ObjectOnLand((TypeObject,)),
+    ObjectOnAnything((TypeObject,)),
     IgnoreObjs((TypeObject,)),
     ObserveObjs((TypeObject,)),
     Distance((TypeObject,TypeObject,TypeVar)),
@@ -947,6 +1037,8 @@ pub enum ActionOperation {
     Get((TypeItem,)),
     GetV((TypeVar,)),
     Drop((TypeItem,)),
+    PutV ((TypeVar,TypeVar)),
+    GetRoomV((TypeVar,TypeVar)),
     LoadSound((TypeNum,)),
     Sound((TypeNum,TypeFlag)),
     StopSound(()),
@@ -991,18 +1083,25 @@ pub enum ActionOperation {
     ToggleMonitor(()),
     ScriptSize((TypeNum,)),
     Version(()),
-    Log((TypeMessage,)),
     SetGameID((TypeMessage,)),
+    Log((TypeMessage,)),
+    SetScanStart(()),
+    ResetScanStart(()),
     RepositionTo((TypeObject,TypeNum,TypeNum)),
     RepositionToV((TypeObject,TypeVar,TypeVar)),
     TraceInfo((TypeNum,TypeNum,TypeNum)),
     PrintAtV0((TypeMessage,TypeNum,TypeNum)),
     PrintAtV1((TypeMessage,TypeNum,TypeNum,TypeNum)),
+    ClearTextRect((TypeNum,TypeNum,TypeNum,TypeNum,TypeNum)),
     SetMenu((TypeMessage,)),
     SetMenuMember((TypeMessage,TypeController)),
     SubmitMenu(()),
     DisableMember((TypeController,)),
     MenuInput(()),
+    CloseWindow(()),
+    ShowObjV((TypeVar,)),
+    MulN((TypeVar,TypeNum)),
+    MulV((TypeVar,TypeVar)),
     Goto((TypeGoto,)),
     If((Vec<LogicChange>,TypeGoto)),
 }
@@ -1181,9 +1280,11 @@ impl LogicResource {
             ConditionOperation::RightPosN(a) |
             ConditionOperation::PosN(a) |
             ConditionOperation::ObjInBox(a) => format!("{},{},{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3),Self::param_dis_num(&a.4)),
+            ConditionOperation::CompareStrings(a) => format!("{},{}",Self::param_dis_string(&a.0),Self::param_dis_string(&a.1)),
             ConditionOperation::Said(a) => Self::param_dis_said(&a.0, words),
             ConditionOperation::HaveKey(_) => String::from(""),
             ConditionOperation::Controller(a) => Self::param_dis_controller(&a.0),
+            ConditionOperation::ObjInRoom(a) => format!("{} {}",Self::param_dis_item(&a.0, items),Self::param_dis_var(&a.1)),
             ConditionOperation::Has(a) => Self::param_dis_item(&a.0, items),
             ConditionOperation::IsSetV(a) => Self::param_dis_var(&a.0),
             ConditionOperation::IsSet(a) => Self::param_dis_flag(&a.0),
@@ -1249,6 +1350,9 @@ impl LogicResource {
             ActionOperation::ShowPriScreen(_) |
             ActionOperation::SubmitMenu(_) |
             ActionOperation::MenuInput(_) |
+            ActionOperation::SetScanStart(_) |
+            ActionOperation::ResetScanStart(_) |
+            ActionOperation::CloseWindow(_) |
             ActionOperation::Version(_) => String::new(),
             ActionOperation::Increment(a) |
             ActionOperation::Decrement(a) |
@@ -1263,6 +1367,8 @@ impl LogicResource {
             ActionOperation::LoadViewV(a) |
             ActionOperation::GetV(a) |
             ActionOperation::PrintV(a) |
+            ActionOperation::ShowObjV(a) |
+            ActionOperation::LoadLogicV(a) |
             ActionOperation::ObjStatusV(a) => Self::param_dis_var(&a.0),
             ActionOperation::NewRoom(a) |
             ActionOperation::LoadLogic(a) |
@@ -1290,6 +1396,7 @@ impl LogicResource {
             ActionOperation::ObserveHorizon(a) |
             ActionOperation::ObjectOnWater(a) |
             ActionOperation::ObjectOnLand(a) |
+            ActionOperation::ObjectOnAnything(a) |
             ActionOperation::IgnoreObjs(a) |
             ActionOperation::ObserveObjs(a) |
             ActionOperation::StopCycling(a) |
@@ -1315,11 +1422,15 @@ impl LogicResource {
             ActionOperation::AddN(a) |
             ActionOperation::SubN(a) |
             ActionOperation::LIndirectN(a) |
+            ActionOperation::MulN(a) |
             ActionOperation::AssignN(a) => format!("{},{}",Self::param_dis_var(&a.0),Self::param_dis_num(&a.1)),
             ActionOperation::AddV(a) |
             ActionOperation::SubV(a) |
+            ActionOperation::GetRoomV(a) |
+            ActionOperation::PutV(a) |
             ActionOperation::LIndirectV(a) |
             ActionOperation::RIndirect(a) |
+            ActionOperation::MulV(a) |
             ActionOperation::AssignV(a) => format!("{},{}",Self::param_dis_var(&a.0),Self::param_dis_var(&a.1)),
             ActionOperation::SetView(a) |
             ActionOperation::SetLoop(a) |
@@ -1361,6 +1472,7 @@ impl LogicResource {
             ActionOperation::PrintAtV0(a) => format!("{},{},{}",self.param_dis_message(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2)),
             ActionOperation::Block(a) => format!("{},{},{},{}",Self::param_dis_num(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3)),
             ActionOperation::PrintAtV1(a) => format!("{},{},{},{}",self.param_dis_message(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3)),
+            ActionOperation::ClearTextRect(a) => format!("{},{},{},{},{}",Self::param_dis_num(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3),Self::param_dis_num(&a.4)),
             ActionOperation::MoveObj(a) => format!("{},{},{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3),Self::param_dis_flag(&a.4)),
             ActionOperation::MoveObjV(a) => format!("{},{},{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_var(&a.1),Self::param_dis_var(&a.2),Self::param_dis_var(&a.3),Self::param_dis_flag(&a.4)),
             ActionOperation::GetString(a) => format!("{},{},{},{},{}",Self::param_dis_string(&a.0),self.param_dis_message(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3),Self::param_dis_num(&a.4)),
@@ -1568,6 +1680,10 @@ impl LogicSequence {
         Ok((Self::parse_var(iter)?,Self::parse_var(iter)?))
     }
     
+    fn parse_item_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeItem,TypeVar), &'static str> {
+        Ok((Self::parse_item(iter)?,Self::parse_var(iter)?))
+    }
+    
     fn parse_object_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeNum), &'static str> {
         Ok((Self::parse_object(iter)?,Self::parse_num(iter)?))
     }
@@ -1578,6 +1694,10 @@ impl LogicSequence {
 
     fn parse_object_flag(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeFlag), &'static str> {
         Ok((Self::parse_object(iter)?,Self::parse_flag(iter)?))
+    }
+
+    fn parse_string_string(iter:&mut std::slice::Iter<u8>) -> Result<(TypeString,TypeString), &'static str> {
+        Ok((Self::parse_string(iter)?,Self::parse_string(iter)?))
     }
 
     fn parse_string_message(iter:&mut std::slice::Iter<u8>) -> Result<(TypeString,TypeMessage), &'static str> {
@@ -1632,8 +1752,16 @@ impl LogicSequence {
         Ok((Self::parse_object(iter)?,Self::parse_num(iter)?,Self::parse_flag(iter)?))
     }
 
+    fn parse_message_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeMessage,TypeNum,TypeNum,TypeNum), &'static str> {
+        Ok((Self::parse_message(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?))
+    }
+
     fn parse_num_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum,TypeNum,TypeNum), &'static str> {
         Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?))
+    }
+    
+    fn parse_num_num_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeNum,TypeNum,TypeNum,TypeNum,TypeNum), &'static str> {
+        Ok((Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?))
     }
     
     fn parse_object_num_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeNum,TypeNum,TypeNum,TypeNum), &'static str> {
@@ -1664,10 +1792,12 @@ impl LogicSequence {
         match code {
             0x12 => Ok(ConditionOperation::RightPosN(Self::parse_object_num_num_num_num(iter)?)),
             0x10 => Ok(ConditionOperation::ObjInBox(Self::parse_object_num_num_num_num(iter)?)),
+            0x0F => Ok(ConditionOperation::CompareStrings(Self::parse_string_string(iter)?)),
             0x0E => Ok(ConditionOperation::Said((Self::parse_said(iter)?,))),
             0x0D => Ok(ConditionOperation::HaveKey(())),
             0x0C => Ok(ConditionOperation::Controller((Self::parse_controller(iter)?,))),
             0x0B => Ok(ConditionOperation::PosN(Self::parse_object_num_num_num_num(iter)?)),
+            0x0A => Ok(ConditionOperation::ObjInRoom(Self::parse_item_var(iter)?)),
             0x09 => Ok(ConditionOperation::Has((Self::parse_item(iter)?,))),
             0x08 => Ok(ConditionOperation::IsSetV((Self::parse_var(iter)?,))),
             0x07 => Ok(ConditionOperation::IsSet((Self::parse_flag(iter)?,))),
@@ -1747,15 +1877,22 @@ impl LogicSequence {
             let action = match b {
                 0xFF => ActionOperation::If(Self::parse_vlogic_change_goto(&mut iter)?),
                 0xFE => ActionOperation::Goto((Self::parse_goto(&mut iter)?,)),
+                0xA9 => ActionOperation::CloseWindow(()),
+                0xA6 => ActionOperation::MulV(Self::parse_var_var(&mut iter)?),
+                0xA5 => ActionOperation::MulN(Self::parse_var_num(&mut iter)?),
+                0xA2 => ActionOperation::ShowObjV((Self::parse_var(&mut iter)?,)),
                 0xA1 => ActionOperation::MenuInput(()),
                 0xA0 => ActionOperation::DisableMember((Self::parse_controller(&mut iter)?,)),
                 0x9E => ActionOperation::SubmitMenu(()),
                 0x9D => ActionOperation::SetMenuMember(Self::parse_message_controller(&mut iter)?),
                 0x9C => ActionOperation::SetMenu((Self::parse_message(&mut iter)?,)),
-                0x97 => if version == "2.089" {ActionOperation::PrintAtV0(Self::parse_message_num_num(&mut iter)?) } else {panic!("DAMN")},
+                0x9A => ActionOperation::ClearTextRect(Self::parse_num_num_num_num_num(&mut iter)?),
+                0x97 => if version == "2.089" || version == "2.272" {ActionOperation::PrintAtV0(Self::parse_message_num_num(&mut iter)?) } else if version=="2.440" {ActionOperation::PrintAtV1(Self::parse_message_num_num_num(&mut iter)?)} else {panic!("DAMN")},
                 0x96 => ActionOperation::TraceInfo(Self::parse_num_num_num(&mut iter)?),
                 0x94 => ActionOperation::RepositionToV(Self::parse_object_var_var(&mut iter)?),
                 0x93 => ActionOperation::RepositionTo(Self::parse_object_num_num(&mut iter)?),
+                0x92 => ActionOperation::ResetScanStart(()),
+                0x91 => ActionOperation::SetScanStart(()),
                 0x90 => ActionOperation::Log((Self::parse_message(&mut iter)?,)),
                 0x8F => ActionOperation::SetGameID((Self::parse_message(&mut iter)?,)),
                 0x8E => ActionOperation::ScriptSize((Self::parse_num(&mut iter)?,)),
@@ -1801,6 +1938,8 @@ impl LogicSequence {
                 0x64 => ActionOperation::StopSound(()),
                 0x63 => ActionOperation::Sound(Self::parse_num_flag(&mut iter)?),
                 0x62 => ActionOperation::LoadSound((Self::parse_num(&mut iter)?,)),
+                0x61 => ActionOperation::GetRoomV(Self::parse_var_var(&mut iter)?),
+                0x60 => ActionOperation::PutV(Self::parse_var_var(&mut iter)?),
                 0x5E => ActionOperation::Drop((Self::parse_item(&mut iter)?,)),
                 0x5D => ActionOperation::GetV((Self::parse_var(&mut iter)?,)),
                 0x5C => ActionOperation::Get((Self::parse_item(&mut iter)?,)),
@@ -1826,6 +1965,7 @@ impl LogicSequence {
                 0x45 => ActionOperation::Distance(Self::parse_object_object_var(&mut iter)?),
                 0x44 => ActionOperation::ObserveObjs((Self::parse_object(&mut iter)?,)),
                 0x43 => ActionOperation::IgnoreObjs((Self::parse_object(&mut iter)?,)),
+                0x42 => ActionOperation::ObjectOnAnything((Self::parse_object(&mut iter)?,)),
                 0x41 => ActionOperation::ObjectOnLand((Self::parse_object(&mut iter)?,)),
                 0x40 => ActionOperation::ObjectOnWater((Self::parse_object(&mut iter)?,)),
                 0x3F => ActionOperation::SetHorizon((Self::parse_num(&mut iter)?,)),
@@ -1869,6 +2009,7 @@ impl LogicSequence {
                 0x18 => ActionOperation::LoadPic((Self::parse_var(&mut iter)?,)),
                 0x17 => ActionOperation::CallV((Self::parse_var(&mut iter)?,)),
                 0x16 => ActionOperation::Call((Self::parse_num(&mut iter)?,)),
+                0x15 => ActionOperation::LoadLogicV((Self::parse_var(&mut iter)?,)),
                 0x14 => ActionOperation::LoadLogic((Self::parse_num(&mut iter)?,)),
                 0x13 => ActionOperation::NewRoomV((Self::parse_var(&mut iter)?,)),
                 0x12 => ActionOperation::NewRoom((Self::parse_num(&mut iter)?,)),
@@ -1891,6 +2032,7 @@ impl LogicSequence {
                 0x00 => ActionOperation::Return(()),
                 _ => {panic!("Unimplemented action {b:02X}");}
             };
+
             operations.push(LogicOperation { action,address });
         }
 
@@ -1952,10 +2094,12 @@ impl LogicSequence {
             ConditionOperation::IsSet((flag,)) => state.get_flag(flag),
             ConditionOperation::IsSetV(_) => todo!(),
             ConditionOperation::Has(_) =>  /* TODO */ false,
+            ConditionOperation::ObjInRoom(_) => todo!(),
             ConditionOperation::PosN((obj,num1,num2,num3,num4)) => is_left_edge_in_box(resources,state,obj,num1,num2,num3,num4),
             ConditionOperation::Controller(_) => /* TODO */ false,
             ConditionOperation::HaveKey(_) => state.key_len>0,
             ConditionOperation::Said((w,)) => state.check_said(w),
+            ConditionOperation::CompareStrings(_) => todo!(),
             ConditionOperation::ObjInBox((obj,num1,num2,num3,num4)) => is_left_and_right_edge_in_box(resources,state,obj,num1, num2,num3,num4),
             ConditionOperation::RightPosN((obj,num1,num2,num3,num4)) => is_right_edge_in_box(resources,state,obj,num1,num2,num3,num4),
         }
@@ -2041,9 +2185,11 @@ impl LogicSequence {
             ActionOperation::SetKey((a,b,c)) => /* TODO RAGI */ { println!("TODO : SetKey {:?},{:?},{:?}",a,b,c);},
             ActionOperation::Print((m,)) => /* TODO RAGI */ { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; println!("TODO : Print {}",m); },
             ActionOperation::PrintV((var,)) => /* TODO RAGI */ { let m=&TypeMessage::from(state.get_var(var)); let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; println!("TODO : PrintV {}",m); },
-            ActionOperation::AddToPic((num1,num2,num3,num4,num5,num6,num7)) => /* TODO RAGI */ {
-                println!("TODO - AddToPic {:?},{:?},{:?},{:?},{:?},{:?},{:?}",num1,num2,num3,num4,num5,num6,num7);
-            },
+            ActionOperation::SetMenu((m,)) => /* TODO RAGI */ { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; println!("TODO : SetMenu {}",m); },
+            ActionOperation::SetMenuMember((m,c)) => /* TODO RAGI */{ let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; println!("TODO : SetMenuMember {} {}",m,state.get_controller(c)); },
+            ActionOperation::SubmitMenu(()) => /* TODO RAGI */ { println!("TODO : SubmitMenu")},
+            ActionOperation::TraceInfo((num1,num2,num3)) => /* TODO RAGI */ { println!("TODO : TraceInfo {} {} {}",state.get_num(num1),state.get_num(num2),state.get_num(num3)); }
+            ActionOperation::DisableMember((c,)) => /* TODO RAGI */ println!("TODO : Disable Member {}", state.get_controller(c)),
             
 
             // Not needed
@@ -2052,8 +2198,10 @@ impl LogicSequence {
             ActionOperation::LoadViewV((_var,)) => {/* NO-OP-RAGI */},
             ActionOperation::LoadPic((_var,)) => {/* NO-OP-RAGI */},
             ActionOperation::LoadLogic((_num,)) => {/* NO-OP-RAGI */},
+            ActionOperation::LoadLogicV((_var,)) => {/* NO-OP-RAGI */},
             ActionOperation::LoadSound((_num,)) => {/* NO-OP-RAGI */},
             ActionOperation::DiscardPic((_var,)) => {/* NO-OP-RAGI */},
+            ActionOperation::DiscardView((_num,)) => {/* NO-OP-RAGI */},
 
             // Everything else
             ActionOperation::If((condition,goto_if_false)) => if !Self::evaluate_condition(resources,state,condition) { return Some(pc.jump(self,goto_if_false)); },
@@ -2112,8 +2260,8 @@ impl LogicSequence {
                 }
             },
             ActionOperation::Erase((obj,)) => state.mut_object(obj).set_visible(false),
-            ActionOperation::Display((num1,num2,m)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; let x=state.get_num(num2); let y=state.get_num(num1); Self::display_text(resources,state,x,y,m); },
-            ActionOperation::DisplayV((var1,var2,var3)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(&TypeMessage::from(state.get_var(var3))) as usize]; let x=state.get_var(var2); let y=state.get_var(var1); Self::display_text(resources,state,x,y,m); },
+            ActionOperation::Display((num1,num2,m)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; let x=state.get_num(num2); let y=state.get_num(num1); Self::display_text(resources,state,x,y,m,state.get_ink(),state.get_paper()); },
+            ActionOperation::DisplayV((var1,var2,var3)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(&TypeMessage::from(state.get_var(var3))) as usize]; let x=state.get_var(var2); let y=state.get_var(var1); Self::display_text(resources,state,x,y,m,state.get_ink(),state.get_paper()); },
             ActionOperation::ReverseLoop((obj,flag)) => state.mut_object(obj).set_one_shot_reverse(flag),
             ActionOperation::Random((num1,num2,var)) => { let r = state.get_random(num1,num2); state.set_var(var,r); },
             ActionOperation::Set((flag,)) => state.set_flag(flag, true),
@@ -2126,11 +2274,34 @@ impl LogicSequence {
                 let y=state.get_num(num1); 
                 let max_length = state.get_num(num3) as usize;
                 let input = state.get_string(s).clone();
-                let (done,new_string) = command_input(state, input, max_length, m, resources, x, y);
+                let (done,new_string) = command_input(state, input, max_length, m, resources, x, y,state.get_ink(),state.get_paper(),false);
 
                 *state.get_mut_string(s)=new_string;
                 if !done {
                     return Some(pc.user_input());
+                }
+
+            },
+            ActionOperation::GetNum((m,var)) => {
+                // This actually halts interpretter until the input string is entered
+                let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; 
+                let x=0;
+                let y=22;
+                let max_length = 5;
+                let input = state.get_num_string().clone();
+                let (done,new_string) = command_input(state, input, max_length, m, resources, x, y,state.get_ink(),state.get_paper(),true);
+
+                *state.mut_num_string()=new_string;
+                if !done {
+                    return Some(pc.user_input());
+                } else {
+                    // string to num
+                    let val = match state.get_num_string().parse::<u8>() {
+                        Ok(i) => i,
+                        Err(_) => 255,
+                    };
+                    state.set_var(var,val);
+                    state.mut_num_string().clear();
                 }
 
             },
@@ -2174,6 +2345,25 @@ impl LogicSequence {
             ActionOperation::Position((obj,num1,num2)) => { let x=state.get_num(num1); let y=state.get_num(num2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
             ActionOperation::RepositionToV((obj,var1,var2)) => {let x=state.get_var(var1); let y=state.get_var(var2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
             ActionOperation::PositionV((obj,var1,var2)) => { let x=state.get_var(var1); let y=state.get_var(var2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
+            ActionOperation::SetTextAttribute((num1,num2)) => { let ink=state.get_num(num1); let paper=state.get_num(num2); state.set_ink(ink); state.set_paper(paper); }
+            ActionOperation::StatusLineOff(()) => state.set_status_visible(false),
+            ActionOperation::StepTime((obj,var)) => { let time=state.get_var(var); state.mut_object(obj).set_step_time(time); },
+            ActionOperation::CycleTime((obj,var)) => { let time=state.get_var(var); state.mut_object(obj).set_cycle_time(time); },
+            ActionOperation::ObserveHorizon((obj,)) => state.mut_object(obj).set_ignore_horizon(false),
+            ActionOperation::CurrentCel((obj,var)) => { let cur = state.object(obj).get_cel(); state.set_var(var,cur); },
+            ActionOperation::CurrentLoop((obj,var)) => { let cur = state.object(obj).get_loop(); state.set_var(var,cur); },
+            ActionOperation::CurrentView((obj,var)) => { let cur = state.object(obj).get_view(); state.set_var(var,cur); },
+            ActionOperation::FixLoop((obj,)) => state.mut_object(obj).set_fixed_loop(true),
+            ActionOperation::AddToPic((num1,num2,num3,num4,num5,num6,num7)) => /* TODO RAGI */ {
+                let view=state.get_num(num1);
+                let cloop=state.get_num(num2);
+                let cel=state.get_num(num3);
+                let x=state.get_num(num4) as usize;
+                let y=state.get_num(num5) as usize;
+                let rpri=state.get_num(num6);
+                let margin=state.get_num(num7);
+                render_view_to_pic(resources, state, view, cloop, cel, x, y, rpri, margin);
+            },
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
@@ -2181,7 +2371,7 @@ impl LogicSequence {
         Some(pc.next())
     }
  
-    pub fn render_glyph(resources:&GameResources,state:&mut LogicState,x:u16,y:u8,g:u8) {
+    pub fn render_glyph(resources:&GameResources,state:&mut LogicState,x:u16,y:u8,g:u8,ink:u8,paper:u8) {
         let s = resources.font.as_slice();
         let x = x as usize;
         let y = y as usize;
@@ -2190,22 +2380,22 @@ impl LogicSequence {
             let mut bits = s[index];
             for xx in 0..8 {
                 if (bits & 0x80) == 0x80 {
-                    state.back_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = 15;
-                    state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = 15;
+                    state.back_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = ink;
+                    state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = ink;
                 } else {
-                    state.back_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = 0;
-                    state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = 0;
+                    state.back_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = paper;
+                    state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = paper;
                 }
                 bits<<=1;
             }
         }
     }
 
-    pub fn display_text(resources:&GameResources,state:&mut LogicState,x:u8,y:u8,s:&String) {
+    pub fn display_text(resources:&GameResources,state:&mut LogicState,x:u8,y:u8,s:&String,ink:u8,paper:u8) {
         let mut x = (x as u16)*8;
         let y=y*8;
         for l in s.as_bytes() {
-            Self::render_glyph(resources, state, x, y, *l);
+            Self::render_glyph(resources, state, x, y, *l,ink,paper);
             x+=8;
         }
     }
@@ -2237,7 +2427,7 @@ pub fn parse_input_string(state: &mut LogicState, s: String, resources: &GameRes
     }
 }
 
-pub fn command_input(state: &mut LogicState, s: String, max_length: usize, m: &String, resources: &GameResources, x: u8, y: u8) -> (bool,String) {
+pub fn command_input(state: &mut LogicState, s: String, max_length: usize, m: &String, resources: &GameResources, x: u8, y: u8, ink:u8, paper:u8, number_only:bool) -> (bool,String) {
     let mut new_string = s;
     let mut done = false;
     for a in 0..state.key_len {
@@ -2245,17 +2435,17 @@ pub fn command_input(state: &mut LogicState, s: String, max_length: usize, m: &S
         match c {
             13 => { done=true; break; },
             8 => { new_string.pop(); },
-            b'a'..=b'z' => if new_string.len() < max_length {new_string.push(char::from(c)) },
-            b'A'..=b'Z' => if new_string.len() < max_length {new_string.push(char::from(c)) },
+            b'a'..=b'z' => if !number_only && new_string.len() < max_length {new_string.push(char::from(c)) },
+            b'A'..=b'Z' => if !number_only && new_string.len() < max_length {new_string.push(char::from(c)) },
             b'0'..=b'9' => if new_string.len() < max_length {new_string.push(char::from(c)) },
-            32 => if new_string.len() < max_length {new_string.push(char::from(c)) },
+            32 => if !number_only && new_string.len() < max_length {new_string.push(char::from(c)) },
             _ => {},
         }
     }
     // Go through keyboard buffer and append/remove keys?
     let to_show = m.clone()+new_string.as_str()+state.get_prompt().to_string().as_str();
     let to_show = to_show + format!("{:indent$}","",indent=(max_length+1) - new_string.len()).as_str();
-    LogicSequence::display_text(resources, state, x, y, &to_show);
+    LogicSequence::display_text(resources, state, x, y, &to_show,ink,paper);
     // pull keycodes off 
     (done,new_string)
 }
@@ -2349,6 +2539,10 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
             continue;
         }
 
+        if !state.mut_object(obj_num).should_step() {
+            continue;
+        }
+
         match state.object(obj_num).get_motion_kind() {
             SpriteMotion::Normal => {}, // what ever is in direction is used
             SpriteMotion::Wander => {   // update direction randomly, if didn't move last time
@@ -2362,8 +2556,8 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
                 let y=FP32::from(state.object(obj_num).get_y_fp16());
                 let ex=FP32::from(state.object(obj_num).get_end_x());
                 let ey=FP32::from(state.object(obj_num).get_end_y());
-                let dx = (ex-x).signum();
-                let dy = (ey-y).signum();
+                let dx = (ex.int()-x.int()).signum();
+                let dy = (ey.int()-y.int()).signum();
                 let direction = get_direction_from_delta(dx.to_num(), dy.to_num());
                 state.mut_object(obj_num).set_direction(direction);
                 if direction==0 {
@@ -2606,6 +2800,11 @@ pub fn render_sprites(resources:&GameResources,state:&mut LogicState, disable_ba
             let cels = get_cells(resources, state.object(&obj_num));
 
             if state.object(&obj_num).one_shot || state.object(&obj_num).cycle {
+
+                if !state.mut_object(&obj_num).should_cycle() {
+                    continue;
+                }
+
                 let ccel = state.object(&obj_num).get_cel();
                 if state.object(&obj_num).reverse {
                     if c > 0 {
@@ -2630,6 +2829,35 @@ pub fn render_sprites(resources:&GameResources,state:&mut LogicState, disable_ba
         }
     }
 
+}
+
+fn render_view_to_pic(resources: &GameResources, state:&mut LogicState, view:u8, cloop:u8, cel:u8, x:usize, y:usize, rpri:u8, margin:u8) {
+    let view = &resources.views[&(view as usize)];
+    let loops = &view.get_loops()[cloop as usize];
+    let cel = &loops.get_cels()[cel as usize];
+    let t = cel.get_transparent_colour();
+    let d = cel.get_data();
+    let mirror=cel.is_mirror(cloop);
+    let w = cel.get_width().into();
+    let h = cel.get_height().into();
+    for yy in 0..h {
+        for xx in 0..w {
+            let col = if mirror {d[(w-xx-1)+yy*w]} else {d[xx+yy*w] };
+            if col != t {
+                let sx = xx+x;
+                let sy = yy+y-h;
+                let coord = sx+sy*PIC_WIDTH_USIZE;
+                let pri = fetch_priority_for_pixel_rendering(state,sx,sy);
+                if pri <= rpri {
+                    state.mut_picture()[coord]=col;
+                }
+            }
+        }
+    }
+    // to do border
+    if margin<4 {
+        println!("TODO : Margin : {}",margin);
+    }
 }
 
 fn render_sprite(obj_num:&TypeObject, cell: &view::ViewCel, state: &mut LogicState) {
