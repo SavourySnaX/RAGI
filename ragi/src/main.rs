@@ -100,11 +100,29 @@ impl TexturesUi {
     }
 }
 
+const KQ1:bool=false;
+const LL1:bool=true;
+const SQ1:bool=false;
+
 fn main() -> Result<(), String> {
 
-    let mut interpretter=Interpretter::new("../images/King's Quest v1.0U (1986)(Sierra On-Line, Inc.) [Adventure][!]/","2.272").unwrap();
-    //let mut interpretter=Interpretter::new("../images/Leisure Suit Larry in the Land of the Lounge Lizards (1987)(Sierra On-Line, Inc.) [Adventure]/","2.440").unwrap();
-    //let mut interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/","2.089").unwrap();
+    let mut interpretter:Interpretter;
+
+    if KQ1 {
+        interpretter=Interpretter::new("../images/King's Quest v1.0U (1986)(Sierra On-Line, Inc.) [Adventure][!]/","2.272").unwrap();
+        interpretter.breakpoints.insert(LogicExecutionPosition::new(53,145), false);
+        interpretter.breakpoints.insert(LogicExecutionPosition::new(53,233), false);
+        interpretter.breakpoints.insert(LogicExecutionPosition::new(53,181), false);
+        interpretter.breakpoints.insert(LogicExecutionPosition::new(53,251), false);
+    } else if LL1 {
+        interpretter=Interpretter::new("../images/Leisure Suit Larry in the Land of the Lounge Lizards (1987)(Sierra On-Line, Inc.) [Adventure]/","2.440").unwrap();
+        interpretter.breakpoints.insert(LogicExecutionPosition::new(0,0), false);
+    } else if SQ1 {
+        interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/","2.089").unwrap();
+    } else {
+        panic!("NO GAME SET");
+    }
+
 
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -135,8 +153,6 @@ fn main() -> Result<(), String> {
     let mut event_pump = sdl_context.event_pump()?;
 
     let textures_ui = TexturesUi::new(&gl,&mut textures,64);
-
-    interpretter.breakpoints.insert(LogicExecutionPosition::new(53,145), false);
 
     let live_debug_view=false;
     let mut debug_texture_index:usize=0;
@@ -193,8 +209,11 @@ fn main() -> Result<(), String> {
                 let obj=interpretter.state.object(obj_num);
                 let visible = obj.get_visible();
                 TreeNode::new(format!("Object {}",index)).flags(if visible {TreeNodeFlags::BULLET} else {TreeNodeFlags::OPEN_ON_ARROW}).build(&ui, || {
-                    let c = usize::from(obj.get_cel());
-                    let cels = get_cells(&interpretter.resources, &obj);
+                    let mut c = usize::from(obj.get_cel());
+                    let cels = get_cells_clamped(&interpretter.resources, &obj);
+                    if c>=cels.len() {
+                        c=cels.len()-1;
+                    }
                     let cell = &cels[c];
                     let dbl = double_pic_width(cell.get_data());
                     let rgb=conv_rgba_transparent(&dbl, cell.get_transparent_colour());
@@ -412,6 +431,9 @@ impl Interpretter {
                         if single_step {
                             return;
                         }
+                        if state.get_new_room()!=0 {
+                            stack.clear();  // new_room short circuits the interpretter cycle
+                        }
                         break;
                     },
                 }
@@ -526,8 +548,10 @@ impl Interpretter {
             }
 
             // dir of EGO <- var(6)
-            let d = mutable_state.get_var(&VAR_EGO_MOTION_DIR);
-            mutable_state.mut_object(&OBJECT_EGO).set_direction(d);
+            let d = mutable_state.object(&OBJECT_EGO).get_direction();
+            mutable_state.set_var(&VAR_EGO_MOTION_DIR, d);
+//            let d = mutable_state.get_var(&VAR_EGO_MOTION_DIR);
+//            mutable_state.mut_object(&OBJECT_EGO).set_direction(d);
             mutable_state.set_var(&VAR_OBJ_EDGE, 0);
             mutable_state.set_var(&VAR_OBJ_TOUCHED_BORDER, 0);
             mutable_state.set_flag(&FLAG_ROOM_FIRST_TIME, false);

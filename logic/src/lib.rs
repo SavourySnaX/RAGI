@@ -54,6 +54,14 @@ pub enum SpriteMotion {
     MoveObj,
 }
 
+#[derive(Debug)]
+pub enum SpriteCycle {
+    Normal,
+    Reverse,
+    OneShot,
+    OneShotReverse
+}
+
 #[derive(Debug)] // TODO revisit copy
 pub struct Sprite {
     active:bool,    // object is processed
@@ -68,8 +76,7 @@ pub struct Sprite {
     restrict_to_land:bool,  // object is restricted to non priority 3 pixels
     restrict_to_water:bool, // object is restricted to priority 3 pixels
     cycle:bool,     // cycle loop automatically
-    one_shot:bool,  // runs until end of current loop, and triggers flag
-    reverse:bool,   // reverses the order of animation 
+    cycle_kind:SpriteCycle,
     motion_kind:SpriteMotion,
     direction:u8,   // current direction of travel (0-stop, 1-N, 2-NE, 3-E, ... 8-NW)
     view:u8,
@@ -78,7 +85,7 @@ pub struct Sprite {
     x:FP16,           // bottom left corner
     y:FP16,
     priority:u8,
-    one_shot_flag:TypeFlag,
+    cycle_flag:TypeFlag,
     move_flag:TypeFlag,
     ex:FP16,
     ey:FP16,
@@ -110,8 +117,7 @@ impl Sprite {
             restrict_to_land: false,
             restrict_to_water: false,
             cycle: true, 
-            one_shot: false,
-            reverse: false,
+            cycle_kind: SpriteCycle::Normal,
             motion_kind: SpriteMotion::Normal,
             direction: 0,
             view: 0, 
@@ -120,7 +126,7 @@ impl Sprite {
             x:FP16::from_num(0), 
             y:FP16::from_num(0),
             priority:0,
-            one_shot_flag:TypeFlag::from(0),
+            cycle_flag:TypeFlag::from(0),
             move_flag: TypeFlag::from(0),
             ex: FP16::from_num(0),
             ey: FP16::from_num(0),
@@ -278,12 +284,6 @@ impl Sprite {
         self.visible=b;
     }
 
-    pub fn set_view(&mut self, view:u8) {
-        self.view = view;
-        self.cloop=0;
-        self.cel=0;
-    }
-
     pub fn set_observing(&mut self,b:bool) {
         self.observing=b;
     }
@@ -308,9 +308,6 @@ impl Sprite {
 
     pub fn set_cycling(&mut self,b:bool) {
         self.cycle=b;
-        if b {
-            self.one_shot=false;
-        }
     }
 
     pub fn set_step_time(&mut self,n:u8) {
@@ -348,6 +345,10 @@ impl Sprite {
         self.priority = 0;
     }
    
+    pub fn set_view(&mut self, view:u8) {
+        self.view = view;
+    }
+
     pub fn set_loop(&mut self,n:u8) {
         self.cloop = n;
     }
@@ -361,20 +362,20 @@ impl Sprite {
     }
 
     pub fn set_one_shot(&mut self,f:&TypeFlag) {
-        self.one_shot=true;
-        self.cycle=false;
-        self.one_shot_flag = *f;
+        self.cycle_kind=SpriteCycle::OneShot;
+        self.cycle_flag = *f;
+        self.cycle=true;
     }
 
     pub fn set_one_shot_reverse(&mut self,f:&TypeFlag) {
-        self.one_shot=true;
-        self.reverse=true;
-        self.cycle=false;
-        self.one_shot_flag = *f;
+        self.cycle_kind=SpriteCycle::OneShotReverse;
+        self.cycle_flag = *f;
+        self.cycle=true;
     }
 
-    pub fn clear_one_shot(&mut self) {
-        self.one_shot=false;
+    pub fn end_one_shot(&mut self) {
+        self.cycle=false;
+        self.cycle_kind=SpriteCycle::Normal;
     }
 
     pub fn set_moved(&mut self,b:bool) {
@@ -644,7 +645,7 @@ impl LogicState {
     }
 
     pub fn is_input_enabled(&self) -> bool {
-        self.input
+        self.input && !self.text_mode
     }
  
     pub fn check_said(&mut self,to_check:&Vec<TypeWord>) -> bool {
@@ -2091,7 +2092,7 @@ impl LogicSequence {
         self.labels.get(goto).map(|b| b.operation_offset)
     }
 
-    fn evaluate_condition_operation(resources:&GameResources,state:&mut LogicState,op:&ConditionOperation) -> bool {
+    fn evaluate_condition_operation(resources:&GameResources,state:&mut LogicState,op:&ConditionOperation,need_tick:&mut bool) -> bool {
         match op {
             ConditionOperation::EqualN((var,num)) => state.get_var(var) == state.get_num(num),
             ConditionOperation::EqualV((var1,var2)) => state.get_var(var1) == state.get_var(var2),
@@ -2105,7 +2106,18 @@ impl LogicSequence {
             ConditionOperation::ObjInRoom(_) => todo!(),
             ConditionOperation::PosN((obj,num1,num2,num3,num4)) => is_left_edge_in_box(resources,state,obj,num1,num2,num3,num4),
             ConditionOperation::Controller(_) => /* TODO */ false,
-            ConditionOperation::HaveKey(_) => state.key_len>0,
+            ConditionOperation::HaveKey(_) => {
+                // Can lock up completely as often used like so :
+                //recheck:
+                //if !HaveKey() {
+                //    goto recheck;
+                //}
+                // So for now, we let interpretter exit if false would be returned
+                let key_pressed = state.key_len>0;
+                state.clear_keys();
+                *need_tick|=!key_pressed;
+                key_pressed
+            },
             ConditionOperation::Said((w,)) => state.check_said(w),
             ConditionOperation::CompareStrings(_) => todo!(),
             ConditionOperation::ObjInBox((obj,num1,num2,num3,num4)) => is_left_and_right_edge_in_box(resources,state,obj,num1, num2,num3,num4),
@@ -2113,25 +2125,25 @@ impl LogicSequence {
         }
     }
 
-    fn evaluate_condition_or(resources:&GameResources,state:&mut LogicState,cond:&Vec<LogicChange>) -> bool {
+    fn evaluate_condition_or(resources:&GameResources,state:&mut LogicState,cond:&Vec<LogicChange>,need_tick:&mut bool) -> bool {
         let mut result = false;
         for a in cond {
             result |= match a {
-                LogicChange::Normal((op,)) => Self::evaluate_condition_operation(resources,state,op),
-                LogicChange::Not((op,)) => !Self::evaluate_condition_operation(resources,state,op),
+                LogicChange::Normal((op,)) => Self::evaluate_condition_operation(resources,state,op,need_tick),
+                LogicChange::Not((op,)) => !Self::evaluate_condition_operation(resources,state,op,need_tick),
                 _ => panic!("Should not occur i think {:?}", a),
             };
         }
         result
     }
 
-    fn evaluate_condition(resources:&GameResources,state:&mut LogicState,cond:&Vec<LogicChange>) -> bool {
+    fn evaluate_condition(resources:&GameResources,state:&mut LogicState,cond:&Vec<LogicChange>,need_tick:&mut bool) -> bool {
         let mut result = true;
         for a in cond {
             result &= match a {
-                LogicChange::Normal((op,)) => Self::evaluate_condition_operation(resources,state,op),
-                LogicChange::Not((op,)) => !Self::evaluate_condition_operation(resources,state,op),
-                LogicChange::Or((or_block,)) => Self::evaluate_condition_or(resources,state, or_block),
+                LogicChange::Normal((op,)) => Self::evaluate_condition_operation(resources,state,op,need_tick),
+                LogicChange::Not((op,)) => !Self::evaluate_condition_operation(resources,state,op,need_tick),
+                LogicChange::Or((or_block,)) => Self::evaluate_condition_or(resources,state, or_block,need_tick),
             };
             if !result {  // Early out evaluation
                 break;
@@ -2164,7 +2176,7 @@ impl LogicSequence {
         state.set_var(&VAR_EGO_VIEW,state.object(&OBJECT_EGO).get_view());
         
         let c = usize::from(state.object(&OBJECT_EGO).get_cel());
-        let cels = get_cells(resources, state.object(&OBJECT_EGO));
+        let cels = get_cells_clamped(resources, state.object(&OBJECT_EGO));
         let cell = &cels[c];
 
         match state.get_var(&VAR_EGO_EDGE) {
@@ -2212,7 +2224,21 @@ impl LogicSequence {
             ActionOperation::DiscardView((_num,)) => {/* NO-OP-RAGI */},
 
             // Everything else
-            ActionOperation::If((condition,goto_if_false)) => if !Self::evaluate_condition(resources,state,condition) { return Some(pc.jump(self,goto_if_false)); },
+            ActionOperation::If((condition,goto_if_false)) => {
+                let mut need_tick=false;
+                let new_pc:LogicExecutionPosition;
+                if !Self::evaluate_condition(resources,state,condition,&mut need_tick) 
+                {
+                    new_pc = pc.jump(self,goto_if_false);
+                } else {
+                    new_pc = pc.next();
+                }
+                if need_tick {
+                    return Some(new_pc.user_input());
+                } else {
+                    return Some(new_pc);
+                }
+            },
             ActionOperation::Goto((goto,)) => return Some(pc.jump(self, goto)),
             ActionOperation::Return(()) => return None,
             ActionOperation::Call((num,)) => return Some(LogicExecutionPosition {logic_file:state.get_num(num) as usize, program_counter: 0, user_input_request: false}),
@@ -2252,17 +2278,22 @@ impl LogicSequence {
                 let col = state.get_num(num3);
                 for y in start..=end {
                     for x in 0usize..SCREEN_WIDTH_USIZE {
-                        state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
-                        state.text_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
+                        if state.text_mode {
+                            state.text_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
+                        } else {
+                            state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
+                        }
                     }
                 }
             },
             ActionOperation::SetString((s,m)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; state.set_string(s,m); },
             ActionOperation::Draw((obj,)) => state.mut_object(obj).set_visible(true),
-            ActionOperation::EndOfLoop((obj,flag)) => state.mut_object(obj).set_one_shot(flag),
+            ActionOperation::EndOfLoop((obj,flag)) => { state.set_flag(flag,false); state.mut_object(obj).set_one_shot(flag); },
             ActionOperation::MoveObj((obj,num1,num2,num3,flag)) => { 
                 let x=state.get_num(num1); let y=state.get_num(num2); let s=state.get_num(num3); 
+                state.set_flag(flag, false);
                 state.mut_object(obj).set_move(x, y, s, flag);
+                state.mut_object(obj).set_moved(true);
                 if *obj==OBJECT_EGO {
                     state.set_program_control();
                 }
@@ -2270,7 +2301,7 @@ impl LogicSequence {
             ActionOperation::Erase((obj,)) => state.mut_object(obj).set_visible(false),
             ActionOperation::Display((num1,num2,m)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; let x=state.get_num(num2); let y=state.get_num(num1); Self::display_text(resources,state,x,y,m,state.get_ink(),state.get_paper()); },
             ActionOperation::DisplayV((var1,var2,var3)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(&TypeMessage::from(state.get_var(var3))) as usize]; let x=state.get_var(var2); let y=state.get_var(var1); Self::display_text(resources,state,x,y,m,state.get_ink(),state.get_paper()); },
-            ActionOperation::ReverseLoop((obj,flag)) => state.mut_object(obj).set_one_shot_reverse(flag),
+            ActionOperation::ReverseLoop((obj,flag)) => { state.set_flag(flag, false); state.mut_object(obj).set_one_shot_reverse(flag); },
             ActionOperation::Random((num1,num2,var)) => { let r = state.get_random(num1,num2); state.set_var(var,r); },
             ActionOperation::Set((flag,)) => state.set_flag(flag, true),
             ActionOperation::SetV((var,)) => { let flag=&TypeFlag::from(state.get_var(var)); state.set_flag(flag, true); },
@@ -2335,7 +2366,7 @@ impl LogicSequence {
             ActionOperation::Distance((obj1,obj2,var)) => state.set_var(var,state.object(obj1).distance(state.object(obj2))),
             ActionOperation::ReleasePriority((obj,)) => { state.mut_object(obj).set_priority_auto(); },
             ActionOperation::PlayerControl(()) => state.set_player_control(),
-            ActionOperation::LastCel((obj,var)) => { let cels = get_cells(resources,state.object(obj)); state.set_var(var,(cels.len()-1) as u8); },
+            ActionOperation::LastCel((obj,var)) => { let cels = get_cells_clamped(resources,state.object(obj)); state.set_var(var,(cels.len()-1) as u8); },
             ActionOperation::SetCelV((obj,var)) => { let n=state.get_var(var); state.mut_object(obj).set_cel(n); },
             ActionOperation::StopMotion((obj,)) => state.mut_object(obj).set_enable_motion(false),
             ActionOperation::NormalMotion((obj,)) => state.mut_object(obj).set_normal_motion(),
@@ -2351,6 +2382,7 @@ impl LogicSequence {
             },
             // TODO investigate, Position and RepositionTo act the same, should they
             ActionOperation::Position((obj,num1,num2)) => { let x=state.get_num(num1); let y=state.get_num(num2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
+            ActionOperation::RepositionTo((obj,num1,num2)) => { let x=state.get_num(num1); let y=state.get_num(num2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
             ActionOperation::RepositionToV((obj,var1,var2)) => {let x=state.get_var(var1); let y=state.get_var(var2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
             ActionOperation::PositionV((obj,var1,var2)) => { let x=state.get_var(var1); let y=state.get_var(var2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
             ActionOperation::SetTextAttribute((num1,num2)) => { let ink=state.get_num(num1); let paper=state.get_num(num2); state.set_ink(ink); state.set_paper(paper); }
@@ -2388,11 +2420,17 @@ impl LogicSequence {
             let mut bits = s[index];
             for xx in 0..8 {
                 if (bits & 0x80) == 0x80 {
-                    state.back_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = ink;
-                    state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = ink;
+                    if state.text_mode {
+                        state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = ink;
+                    } else {
+                        state.back_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = ink;
+                    }
                 } else {
-                    state.back_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = paper;
-                    state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = paper;
+                    if state.text_mode {
+                        state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = paper;
+                    } else {
+                        state.back_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = paper;
+                    }
                 }
                 bits<<=1;
             }
@@ -2568,7 +2606,7 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
                 let dy = (ey.int()-y.int()).signum();
                 let direction = get_direction_from_delta(dx.to_num(), dy.to_num());
                 state.mut_object(obj_num).set_direction(direction);
-                if direction==0 {
+                if direction==0 || !state.object(obj_num).has_moved() {
                     let mflag = state.object(obj_num).move_flag;
                     state.set_flag(&mflag, true);
                     state.mut_object(obj_num).clear_move();
@@ -2619,8 +2657,11 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
     let nx = FP16::from_bits((bx&0xFFFF) as u16);
     let ny = FP16::from_bits((by&0xFFFF) as u16);
 
-    let c = usize::from(obj.get_cel());
-    let cels = get_cells(resources, &obj);
+    let mut c = usize::from(obj.get_cel());
+    let cels = get_cells_clamped(resources, &obj);
+    if c>=cels.len() {
+        c=cels.len()-1;
+    }
     let cell = &cels[c];
 
     let w = cell.get_width() as usize;
@@ -2628,7 +2669,7 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
     let tx:usize = nx.to_num();
     let ty:usize = ny.to_num();
     
-    // clip in screen bounds
+    // clip in screen bounds (should these block or clip?)
     if x<0 || y<0 { // y should ideally check y-h
         if x<0 {
             update_edge(state,obj_num,4);
@@ -2637,8 +2678,8 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
         }
         return (false,FP16::ZERO,FP16::ZERO);
     }
-    if tx+w >= PIC_WIDTH_USIZE || ty >= PIC_HEIGHT_USIZE {
-        if tx+w >= PIC_WIDTH_USIZE {
+    if tx+w > PIC_WIDTH_USIZE || ty > PIC_HEIGHT_USIZE {
+        if tx+w > PIC_WIDTH_USIZE {
             update_edge(state,obj_num,2);
         } else {
             update_edge(state,obj_num,3);
@@ -2717,7 +2758,7 @@ pub fn is_left_edge_in_box(_resources:&GameResources,state:&LogicState,obj:&Type
 pub fn is_center_edge_in_box(resources:&GameResources,state:&LogicState,obj:&TypeObject,x1:&TypeNum,y1:&TypeNum,x2:&TypeNum,y2:&TypeNum) -> bool {
     let obj = state.object(obj);
     let c = usize::from(obj.get_cel());
-    let cels = get_cells(resources, obj);
+    let cels = get_cells_clamped(resources, obj);
     let cell = &cels[c];
     let x1=state.get_num(x1);
     let y1=state.get_num(y1);
@@ -2731,7 +2772,7 @@ pub fn is_center_edge_in_box(resources:&GameResources,state:&LogicState,obj:&Typ
 pub fn is_right_edge_in_box(resources:&GameResources,state:&LogicState,obj:&TypeObject,x1:&TypeNum,y1:&TypeNum,x2:&TypeNum,y2:&TypeNum) -> bool {
     let obj = state.object(obj);
     let c = usize::from(obj.get_cel());
-    let cels = get_cells(resources, obj);
+    let cels = get_cells_clamped(resources, obj);
     let cell = &cels[c];
     let x1=state.get_num(x1);
     let y1=state.get_num(y1);
@@ -2753,20 +2794,23 @@ pub fn get_loops<'a>(resources:&'a GameResources,obj:&Sprite) -> &'a Vec<ViewLoo
     view.get_loops()
 }
 
-pub fn get_cells<'a>(resources:&'a GameResources,obj:&Sprite) -> &'a Vec<ViewCel> {
+pub fn get_cells_clamped<'a>(resources:&'a GameResources,obj:&Sprite) -> &'a Vec<ViewCel> {
     let v = usize::from(obj.get_view());
-    let l = usize::from(obj.get_loop());
+    let mut l = usize::from(obj.get_loop());
     let view = &resources.views[&v];
     let loops = view.get_loops();
+    if l>=loops.len() { 
+        l=loops.len()-1;
+    }
     let cloop = &loops[l];
     cloop.get_cels()
 }
+
 
 pub fn update_anims(resources:&GameResources,state:&mut LogicState) {
     for num in state.active_objects_indices() {
         let obj_num = TypeObject::from(num as u8);
         let c = usize::from(state.object(&obj_num).get_cel());
-        let cels = get_cells(resources, state.object(&obj_num));
 
         if !state.object(&obj_num).frozen {
             if !state.object(&obj_num).fixed_loop {
@@ -2798,33 +2842,48 @@ pub fn update_anims(resources:&GameResources,state:&mut LogicState) {
             }
 
             // update cells in case we have switched loop
-            let cels = get_cells(resources, state.object(&obj_num));
+            let cels = get_cells_clamped(resources, state.object(&obj_num));
 
-            if state.object(&obj_num).one_shot || state.object(&obj_num).cycle {
-
+            if state.object(&obj_num).cycle {
                 if !state.mut_object(&obj_num).should_cycle() {
                     continue;
                 }
-
                 let ccel = state.object(&obj_num).get_cel();
-                if state.object(&obj_num).reverse {
-                    if c > 0 {
-                        state.mut_object(&obj_num).set_cel(ccel.wrapping_sub(1));
-                    } else if state.object(&obj_num).cycle {
-                        state.mut_object(&obj_num).set_cel((cels.len()-1) as u8);
-                    } else {
-                        let oflag = state.object(&obj_num).one_shot_flag;
-                        state.set_flag(&oflag,true);
-                        state.mut_object(&obj_num).clear_one_shot();
+                let last_cel = cels.len()-1;
+                // Next cel if able
+                match state.object(&obj_num).cycle_kind {
+                    SpriteCycle::Reverse => {
+                        if c > 0 {
+                            state.mut_object(&obj_num).set_cel(ccel.wrapping_sub(1));
+                        } else {
+                            state.mut_object(&obj_num).set_cel(last_cel as u8);
+                        }
+                    },
+                    SpriteCycle::OneShotReverse => {
+                        if c > 0 {
+                            state.mut_object(&obj_num).set_cel(ccel.wrapping_sub(1));
+                        } else {
+                            let oflag = state.object(&obj_num).cycle_flag;
+                            state.set_flag(&oflag,true);
+                            state.mut_object(&obj_num).end_one_shot();
+                        }
+                    },
+                    SpriteCycle::Normal => {
+                        if last_cel > c {
+                            state.mut_object(&obj_num).set_cel(ccel.wrapping_add(1));
+                        } else {
+                            state.mut_object(&obj_num).set_cel(0);
+                        }
                     }
-                } else if cels.len()-1 > c {
-                    state.mut_object(&obj_num).set_cel(ccel.wrapping_add(1));
-                } else if state.object(&obj_num).cycle {
-                    state.mut_object(&obj_num).set_cel(0);
-                } else {
-                    let oflag = state.object(&obj_num).one_shot_flag;
-                    state.set_flag(&oflag,true);
-                    state.mut_object(&obj_num).clear_one_shot();
+                    SpriteCycle::OneShot => {
+                        if last_cel > c {
+                            state.mut_object(&obj_num).set_cel(ccel.wrapping_add(1));
+                        } else {
+                            let oflag = state.object(&obj_num).cycle_flag;
+                            state.set_flag(&oflag,true);
+                            state.mut_object(&obj_num).end_one_shot();
+                        }
+                    }
                 }
             }
         }
@@ -2837,8 +2896,11 @@ pub fn render_sprites(resources:&GameResources,state:&mut LogicState, disable_ba
 
     for num in state.active_objects_indices_sorted_y() {
         let obj_num = TypeObject::from(num as u8);
-        let c = usize::from(state.object(&obj_num).get_cel());
-        let cels = get_cells(resources, state.object(&obj_num));
+        let mut c = usize::from(state.object(&obj_num).get_cel());
+        let cels = get_cells_clamped(resources, state.object(&obj_num));
+        if c>=cels.len() {
+            c=cels.len()-1;
+        }
         let cell = &cels[c];
 
         if state.object(&obj_num).visible {
