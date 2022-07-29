@@ -116,7 +116,12 @@ fn main() -> Result<(), String> {
         interpretter.breakpoints.insert(LogicExecutionPosition::new(53,251), false);
     } else if LL1 {
         interpretter=Interpretter::new("../images/Leisure Suit Larry in the Land of the Lounge Lizards (1987)(Sierra On-Line, Inc.) [Adventure]/","2.440").unwrap();
-        interpretter.breakpoints.insert(LogicExecutionPosition::new(0,0), false);
+        interpretter.breakpoints.insert(LogicExecutionPosition::new(2,151), false);
+        interpretter.breakpoints.insert(LogicExecutionPosition::new(3,151), false);
+        interpretter.breakpoints.insert(LogicExecutionPosition::new(6,151), false);
+
+        //cheat bypass questions
+        interpretter.state.set_flag(&TypeFlag::from(109),true);
     } else if SQ1 {
         interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/","2.089").unwrap();
     } else {
@@ -473,6 +478,7 @@ impl Interpretter {
         // poll keyb/joystick
         for k in &self.keys {
             if (*k as u32) <256 {
+                mutable_state.set_var(&VAR_CURRENT_KEY,*k as u8);
                 mutable_state.key_pressed(*k as u8);
             }
         }
@@ -548,10 +554,13 @@ impl Interpretter {
             }
 
             // dir of EGO <- var(6)
-            let d = mutable_state.object(&OBJECT_EGO).get_direction();
-            mutable_state.set_var(&VAR_EGO_MOTION_DIR, d);
-//            let d = mutable_state.get_var(&VAR_EGO_MOTION_DIR);
-//            mutable_state.mut_object(&OBJECT_EGO).set_direction(d);
+            if mutable_state.is_ego_player_controlled() {
+                let d = mutable_state.get_var(&VAR_EGO_MOTION_DIR);
+                mutable_state.mut_object(&OBJECT_EGO).set_direction(d);
+            } else {
+                let d = mutable_state.object(&OBJECT_EGO).get_direction();
+                mutable_state.set_var(&VAR_EGO_MOTION_DIR, d);
+            }
             mutable_state.set_var(&VAR_OBJ_EDGE, 0);
             mutable_state.set_var(&VAR_OBJ_TOUCHED_BORDER, 0);
             mutable_state.set_flag(&FLAG_ROOM_FIRST_TIME, false);

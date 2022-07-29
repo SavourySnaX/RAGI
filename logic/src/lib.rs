@@ -36,6 +36,8 @@ pub const VAR_DAYS:TypeVar = type_var_from_u8(14);
 
 pub const VAR_EGO_VIEW:TypeVar = type_var_from_u8(16);
 
+pub const VAR_CURRENT_KEY:TypeVar = type_var_from_u8(19);
+
 pub const FLAG_COMMAND_ENTERED:TypeFlag = type_flag_from_u8(2);
 
 pub const FLAG_SAID_ACCEPTED_INPUT:TypeFlag = type_flag_from_u8(4);
@@ -52,6 +54,7 @@ pub enum SpriteMotion {
     Normal,
     Wander,
     MoveObj,
+    FollowEgo,
 }
 
 #[derive(Debug)]
@@ -391,6 +394,13 @@ impl Sprite {
         self.set_step_size(s)
     }
 
+    pub fn set_follow(&mut self,s:u8,f:&TypeFlag) {
+        self.set_enable_motion(true);   // to confirm
+        self.motion_kind=SpriteMotion::FollowEgo;
+        self.move_flag= *f;
+        self.set_step_size(s)
+    }
+
     pub fn clear_move(&mut self) {
         self.motion_kind=SpriteMotion::Normal;
     }
@@ -523,6 +533,7 @@ pub struct LogicState {
     objects:[Sprite;256],   // overkill, todo add list of active
     string:[String;256],    // overkill
     words:[u16;256],        // overkill
+    logic_start:[usize;256],
 
     num_string:String,
     prompt:char,
@@ -566,6 +577,7 @@ impl LogicState {
             objects: [();256].map(|_| Sprite::new()),
             string: [();256].map(|_| String::new()),
             words: [0u16;256],
+            logic_start: [0usize;256],
             num_string: String::from(""),
             prompt:'_',
             ink:15,
@@ -598,6 +610,10 @@ impl LogicState {
 
     pub fn get_num(&self,v:&TypeNum) -> u8 {
         v.value
+    }
+
+    pub fn get_logic_start(&self,l:u8) -> usize {
+        self.logic_start[l as usize]
     }
 
     pub fn get_controller(&self,c:&TypeController) -> u8 {
@@ -681,6 +697,14 @@ impl LogicState {
 
     pub fn get_random(&mut self,start:&TypeNum,end:&TypeNum) -> u8 {
         self.rng.gen_range(self.get_num(start)..self.get_num(end))
+    }
+
+    pub fn set_logic_start(&mut self,pos:&LogicExecutionPosition) {
+        self.logic_start[pos.logic_file]=pos.program_counter;
+    }
+
+    pub fn clear_logic_start(&mut self,pos:&LogicExecutionPosition) {
+        self.logic_start[pos.logic_file]=0;
     }
 
     pub fn set_var(&mut self,v:&TypeVar,n:u8) {
@@ -2210,6 +2234,8 @@ impl LogicSequence {
             ActionOperation::SubmitMenu(()) => /* TODO RAGI */ { println!("TODO : SubmitMenu")},
             ActionOperation::TraceInfo((num1,num2,num3)) => /* TODO RAGI */ { println!("TODO : TraceInfo {} {} {}",state.get_num(num1),state.get_num(num2),state.get_num(num3)); }
             ActionOperation::DisableMember((c,)) => /* TODO RAGI */ println!("TODO : Disable Member {}", state.get_controller(c)),
+            ActionOperation::CancelLine(()) => /* TODO RAGI */ println!("TODO : CancelLine"),
+            ActionOperation::ForceUpdate((o,)) => /* TODO RAGI */ println!("TODO : ForceUpdate {:?}",o),
             
 
             // Not needed
@@ -2241,11 +2267,12 @@ impl LogicSequence {
             },
             ActionOperation::Goto((goto,)) => return Some(pc.jump(self, goto)),
             ActionOperation::Return(()) => return None,
-            ActionOperation::Call((num,)) => return Some(LogicExecutionPosition {logic_file:state.get_num(num) as usize, program_counter: 0, user_input_request: false}),
-            ActionOperation::CallV((var,)) => return Some(LogicExecutionPosition {logic_file:state.get_var(var) as usize, program_counter: 0, user_input_request: false}),
+            ActionOperation::Call((num,)) => { let logic = state.get_num(num); return Some(LogicExecutionPosition {logic_file:logic as usize, program_counter: state.get_logic_start(logic), user_input_request: false}) },
+            ActionOperation::CallV((var,)) => { let logic = state.get_var(var); return Some(LogicExecutionPosition {logic_file:logic as usize, program_counter: state.get_logic_start(logic), user_input_request: false}) },
             ActionOperation::AssignN((var,num)) => state.set_var(var,state.get_num(num)),
             ActionOperation::AssignV((var1,var2)) => state.set_var(var1,state.get_var(var2)),
             ActionOperation::NewRoom((num,)) => { state.set_new_room(state.get_num(num)); return None },
+            ActionOperation::NewRoomV((var,)) => { state.set_new_room(state.get_var(var)); return None },
             ActionOperation::Reset((flag,)) => state.set_flag(flag, false),
             ActionOperation::ResetV((var,)) => { let flag=&TypeFlag::from(state.get_var(var)); state.set_flag(flag, false); },
             ActionOperation::AnimateObj((obj,)) => state.mut_object(obj).set_active(true),
@@ -2372,7 +2399,9 @@ impl LogicSequence {
             ActionOperation::NormalMotion((obj,)) => state.mut_object(obj).set_normal_motion(),
             ActionOperation::StartMotion((obj,)) => state.mut_object(obj).set_enable_motion(true),
             ActionOperation::AddN((var,num)) => state.set_var(var,state.get_var(var).wrapping_add(state.get_num(num))),
+            ActionOperation::AddV((var1,var2)) => state.set_var(var1,state.get_var(var1).wrapping_add(state.get_var(var2))),
             ActionOperation::SubN((var,num)) => state.set_var(var,state.get_var(var).wrapping_sub(state.get_num(num))),
+            ActionOperation::SubV((var1,var2)) => state.set_var(var1,state.get_var(var1).wrapping_sub(state.get_var(var2))),
             ActionOperation::MoveObjV((obj,var1,var2,var3,flag)) => { 
                 let x=state.get_var(var1); let y=state.get_var(var2); let s=state.get_var(var3); 
                 state.mut_object(obj).set_move(x, y, s, flag);
@@ -2404,7 +2433,14 @@ impl LogicSequence {
                 let margin=state.get_num(num7);
                 render_view_to_pic(resources, state, view, cloop, cel, x, y, rpri, margin);
             },
-
+            ActionOperation::SetScanStart(()) => state.set_logic_start(&pc.next()),
+            ActionOperation::ResetScanStart(()) => state.clear_logic_start(&pc.next()),
+            ActionOperation::FollowEgo((obj,s,f)) => {
+                let s=state.get_num(s); 
+                state.set_flag(f, false);
+                state.mut_object(obj).set_follow(s, f);
+            },
+            ActionOperation::Toggle((f,)) => { let b=state.get_flag(f); state.set_flag(f, !b); },
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
 
@@ -2607,6 +2643,21 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
                 let direction = get_direction_from_delta(dx.to_num(), dy.to_num());
                 state.mut_object(obj_num).set_direction(direction);
                 if direction==0 || !state.object(obj_num).has_moved() {
+                    let mflag = state.object(obj_num).move_flag;
+                    state.set_flag(&mflag, true);
+                    state.mut_object(obj_num).clear_move();
+                }
+            },
+            SpriteMotion::FollowEgo => {
+                let x=FP32::from(state.object(obj_num).get_x_fp16());
+                let y=FP32::from(state.object(obj_num).get_y_fp16());
+                let ex=FP32::from(state.object(&OBJECT_EGO).get_x_fp16());
+                let ey=FP32::from(state.object(&OBJECT_EGO).get_y_fp16());
+                let dx = (ex.int()-x.int()).signum();
+                let dy = (ey.int()-y.int()).signum();
+                let direction = get_direction_from_delta(dx.to_num(), dy.to_num());
+                state.mut_object(obj_num).set_direction(direction);
+                if direction==0 {
                     let mflag = state.object(obj_num).move_flag;
                     state.set_flag(&mflag, true);
                     state.mut_object(obj_num).clear_move();
@@ -2941,11 +2992,14 @@ fn render_view_to_pic(resources: &GameResources, state:&mut LogicState, view:u8,
 fn render_sprite(obj_num:&TypeObject, cell: &view::ViewCel, state: &mut LogicState) {
     let x = usize::from(state.object(obj_num).get_x());
     let y = usize::from(state.object(obj_num).get_y());
-    let h = usize::from(cell.get_height());
+    let mut h = usize::from(cell.get_height());
     let w = usize::from(cell.get_width());
     let t = cell.get_transparent_colour();
     let d = cell.get_data();
     let mirror=cell.is_mirror(state.object(obj_num).get_loop());
+    if y<h {
+        h=y;
+    }
     for yy in 0..h {
         for xx in 0..w {
             let col = if mirror {d[(w-xx-1)+yy*w]} else {d[xx+yy*w] };
