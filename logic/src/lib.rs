@@ -4,7 +4,7 @@ use dir_resource::{ResourceDirectoryEntry, ResourceDirectory};
 use fixed::{FixedU16, types::extra::U8, FixedI32};
 use helpers::{Root, double_pic_width};
 use itertools::Itertools;
-use objects::Objects;
+use objects::{Objects, Object};
 use picture::*;
 use rand::{Rng, prelude::ThreadRng};
 use view::{ViewResource, ViewCel, ViewLoop};
@@ -38,8 +38,10 @@ pub const VAR_EGO_VIEW:TypeVar = type_var_from_u8(16);
 
 pub const VAR_CURRENT_KEY:TypeVar = type_var_from_u8(19);
 
-pub const FLAG_COMMAND_ENTERED:TypeFlag = type_flag_from_u8(2);
+pub const FLAG_EGO_IN_WATER:TypeFlag = type_flag_from_u8(0);
 
+pub const FLAG_COMMAND_ENTERED:TypeFlag = type_flag_from_u8(2);
+pub const FLAG_EGO_TOUCHED_SIGNAL:TypeFlag = type_flag_from_u8(3);
 pub const FLAG_SAID_ACCEPTED_INPUT:TypeFlag = type_flag_from_u8(4);
 pub const FLAG_ROOM_FIRST_TIME:TypeFlag = type_flag_from_u8(5);
 pub const FLAG_RESTART_GAME:TypeFlag = type_flag_from_u8(6);
@@ -534,6 +536,7 @@ pub struct LogicState {
     string:[String;256],    // overkill
     words:[u16;256],        // overkill
     logic_start:[usize;256],
+    item_location:[u8;256],
 
     num_string:String,
     prompt:char,
@@ -563,6 +566,7 @@ impl Default for LogicState {
 }
 
 impl LogicState {
+
     pub fn new() -> LogicState {
         LogicState {
             rng:rand::thread_rng(),
@@ -577,6 +581,7 @@ impl LogicState {
             objects: [();256].map(|_| Sprite::new()),
             string: [();256].map(|_| String::new()),
             words: [0u16;256],
+            item_location: [0u8;256],
             logic_start: [0usize;256],
             num_string: String::from(""),
             prompt:'_',
@@ -590,6 +595,16 @@ impl LogicState {
             post_sprites:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
             text_buffer:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
         }
+    }
+
+    pub fn initialise_rooms(&mut self,items:&Vec<Object>) {
+        for (idx,i) in items.iter().enumerate() {
+            self.item_location[idx]=i.start_room;
+        }
+    }
+
+    pub fn state_get_word(&self,num:u8) -> u16 {
+        self.words[num as usize]
     }
 
     pub fn get_flags(&self) -> impl Iterator<Item = bool> {
@@ -622,6 +637,10 @@ impl LogicState {
 
     pub fn get_new_room(&self) -> u8 {
         self.new_room
+    }
+
+    pub fn get_item_room(&self,item:&TypeItem) -> u8 {
+        self.item_location[item.value as usize]
     }
 
     pub fn get_message(&self,m:&TypeMessage) -> u8 {
@@ -749,6 +768,10 @@ impl LogicState {
     
     pub fn set_program_control(&mut self) {
         self.ego_player_control=false;
+    }
+
+    pub fn set_item_location(&mut self,item:&TypeItem,loc:u8) {
+        self.item_location[item.value as usize]=loc;
     }
 
     pub fn set_new_room(&mut self,r:u8) {
@@ -2126,8 +2149,8 @@ impl LogicSequence {
             ConditionOperation::GreaterV((var1,var2)) => state.get_var(var1) > state.get_var(var2), 
             ConditionOperation::IsSet((flag,)) => state.get_flag(flag),
             ConditionOperation::IsSetV(_) => todo!(),
-            ConditionOperation::Has(_) =>  /* TODO */ false,
-            ConditionOperation::ObjInRoom(_) => todo!(),
+            ConditionOperation::Has((item,)) => state.get_item_room(item)==255,
+            ConditionOperation::ObjInRoom((item,var)) => { let n=state.get_var(var); state.get_item_room(item)==n },
             ConditionOperation::PosN((obj,num1,num2,num3,num4)) => is_left_edge_in_box(resources,state,obj,num1,num2,num3,num4),
             ConditionOperation::Controller(_) => /* TODO */ false,
             ConditionOperation::HaveKey(_) => {
@@ -2218,19 +2241,49 @@ impl LogicSequence {
         // score<- var 3
     }
 
+    fn decode_message_from_resource(&self,state:&LogicState,resources:&GameResources,file:usize,message:&TypeMessage) -> String {
+        let mut new_string=String::from("");
+        let mut c_state = 0;
+        let mut n_kind = b' ';
+        let mut num = 0;
+        for c in resources.logic[&file].logic_messages.strings[state.get_message(message) as usize].bytes() {
+            match c_state {
+                0 => if c == b'%' { c_state=1; } else { new_string.push(c as char); },
+                1 => match c {
+                    b'v' | b'm' | b'o' | b'w' | b's' | b'g'  => { n_kind=c; num=0; c_state=2; },
+                    _ => todo!(),
+                },
+                2 => if c>=b'0' && c<=b'9' { num*=10; num+=c-b'0'; } else 
+                {
+                    new_string.push_str(match n_kind {
+                        b'v' => state.get_var(&TypeVar::from(num)).to_string(),
+                        b'm' => self.decode_message_from_resource(state, resources, file, &TypeMessage::from(num)),
+                        b'o' => resources.objects.objects[num as usize].name.clone(),
+                        b'w' => resources.words.fetch_all(state.state_get_word(num))[0].clone(),
+                        b's' => state.get_string(&TypeString::from(num)).clone(),
+                        b'g' => self.decode_message_from_resource(state, resources, 0, &TypeMessage::from(num)),
+                        _ => todo!(),
+                    }.as_str());
+                    new_string.push(c as char); c_state=0; }
+                _ => todo!(),
+            }
+        }
+        new_string
+    }
+
     fn interpret_instruction(&self,resources:&GameResources,state:&mut LogicState,pc:&LogicExecutionPosition,action:&ActionOperation) -> Option<LogicExecutionPosition> {
 
         match action {
             // Not complete
             ActionOperation::Sound((_num,flag)) => /* TODO RAGI  - for now, just pretend sound finished*/ state.set_flag(flag,true),
             ActionOperation::StopSound(()) => /* TODO RAGI - for now, since we complete sounds straight away, does nothing */ {},
-            ActionOperation::SetGameID((m,)) => /* TODO RAGI - if needed */{let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize];println!("TODO : SetGameID {:?}",m);},
+            ActionOperation::SetGameID((m,)) => /* TODO RAGI - if needed */{let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetGameID {:?}",m);},
             ActionOperation::ConfigureScreen((a,b,c)) => /* TODO RAGI */ { println!("TODO : ConfigureScreen {:?},{:?},{:?}",a,b,c);},
             ActionOperation::SetKey((a,b,c)) => /* TODO RAGI */ { println!("TODO : SetKey {:?},{:?},{:?}",a,b,c);},
-            ActionOperation::Print((m,)) => /* TODO RAGI */ { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; println!("TODO : Print {}",m); },
-            ActionOperation::PrintV((var,)) => /* TODO RAGI */ { let m=&TypeMessage::from(state.get_var(var)); let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; println!("TODO : PrintV {}",m); },
-            ActionOperation::SetMenu((m,)) => /* TODO RAGI */ { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; println!("TODO : SetMenu {}",m); },
-            ActionOperation::SetMenuMember((m,c)) => /* TODO RAGI */{ let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; println!("TODO : SetMenuMember {} {}",m,state.get_controller(c)); },
+            ActionOperation::Print((m,)) => /* TODO RAGI */ { let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : Print {}",m); },
+            ActionOperation::PrintV((var,)) => /* TODO RAGI */ { let m=&TypeMessage::from(state.get_var(var)); let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : PrintV {}",m); },
+            ActionOperation::SetMenu((m,)) => /* TODO RAGI */ { let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetMenu {}",m); },
+            ActionOperation::SetMenuMember((m,c)) => /* TODO RAGI */{ let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetMenuMember {} {}",m,state.get_controller(c)); },
             ActionOperation::SubmitMenu(()) => /* TODO RAGI */ { println!("TODO : SubmitMenu")},
             ActionOperation::TraceInfo((num1,num2,num3)) => /* TODO RAGI */ { println!("TODO : TraceInfo {} {} {}",state.get_num(num1),state.get_num(num2),state.get_num(num3)); }
             ActionOperation::DisableMember((c,)) => /* TODO RAGI */ println!("TODO : Disable Member {}", state.get_controller(c)),
@@ -2313,7 +2366,7 @@ impl LogicSequence {
                     }
                 }
             },
-            ActionOperation::SetString((s,m)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; state.set_string(s,m); },
+            ActionOperation::SetString((s,m)) => { let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); state.set_string(s,m.as_str()); },
             ActionOperation::Draw((obj,)) => state.mut_object(obj).set_visible(true),
             ActionOperation::EndOfLoop((obj,flag)) => { state.set_flag(flag,false); state.mut_object(obj).set_one_shot(flag); },
             ActionOperation::MoveObj((obj,num1,num2,num3,flag)) => { 
@@ -2326,8 +2379,8 @@ impl LogicSequence {
                 }
             },
             ActionOperation::Erase((obj,)) => state.mut_object(obj).set_visible(false),
-            ActionOperation::Display((num1,num2,m)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; let x=state.get_num(num2); let y=state.get_num(num1); Self::display_text(resources,state,x,y,m,state.get_ink(),state.get_paper()); },
-            ActionOperation::DisplayV((var1,var2,var3)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(&TypeMessage::from(state.get_var(var3))) as usize]; let x=state.get_var(var2); let y=state.get_var(var1); Self::display_text(resources,state,x,y,m,state.get_ink(),state.get_paper()); },
+            ActionOperation::Display((num1,num2,m)) => { let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); let x=state.get_num(num2); let y=state.get_num(num1); Self::display_text(resources,state,x,y,&m,state.get_ink(),state.get_paper()); },
+            ActionOperation::DisplayV((var1,var2,var3)) => { let m = self.decode_message_from_resource(state, resources, pc.logic_file, &TypeMessage::from(state.get_var(var3))); let x=state.get_var(var2); let y=state.get_var(var1); Self::display_text(resources,state,x,y,&m,state.get_ink(),state.get_paper()); },
             ActionOperation::ReverseLoop((obj,flag)) => { state.set_flag(flag, false); state.mut_object(obj).set_one_shot_reverse(flag); },
             ActionOperation::Random((num1,num2,var)) => { let r = state.get_random(num1,num2); state.set_var(var,r); },
             ActionOperation::Set((flag,)) => state.set_flag(flag, true),
@@ -2335,12 +2388,12 @@ impl LogicSequence {
             ActionOperation::TextScreen(()) => state.set_text_mode(true),
             ActionOperation::GetString((s,m,num1,num2,num3)) => {
                 // This actually halts interpretter until the input string is entered
-                let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; 
+                let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); 
                 let x=state.get_num(num2); 
                 let y=state.get_num(num1); 
                 let max_length = state.get_num(num3) as usize;
                 let input = state.get_string(s).clone();
-                let (done,new_string) = command_input(state, input, max_length, m, resources, x, y,state.get_ink(),state.get_paper(),false);
+                let (done,new_string) = command_input(state, input, max_length, &m, resources, x, y,state.get_ink(),state.get_paper(),false);
 
                 *state.get_mut_string(s)=new_string;
                 if !done {
@@ -2350,12 +2403,12 @@ impl LogicSequence {
             },
             ActionOperation::GetNum((m,var)) => {
                 // This actually halts interpretter until the input string is entered
-                let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; 
+                let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); 
                 let x=0;
                 let y=22;
                 let max_length = 5;
                 let input = state.get_num_string().clone();
-                let (done,new_string) = command_input(state, input, max_length, m, resources, x, y,state.get_ink(),state.get_paper(),true);
+                let (done,new_string) = command_input(state, input, max_length, &m, resources, x, y,state.get_ink(),state.get_paper(),true);
 
                 *state.mut_num_string()=new_string;
                 if !done {
@@ -2375,7 +2428,7 @@ impl LogicSequence {
                 // Todo move to method - remove punctuation (assuming we allow it into here in the first place)
                 parse_input_string(state, state.get_string(s).clone(), resources);
             }
-            ActionOperation::SetCursorChar((m,)) => { let m = &resources.logic[&pc.logic_file].logic_messages.strings[state.get_message(m) as usize]; state.set_prompt(m.chars().next().unwrap()); },
+            ActionOperation::SetCursorChar((m,)) => { let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); state.set_prompt(m.chars().next().unwrap()); },
             ActionOperation::IgnoreObjs((obj,)) => state.mut_object(obj).set_observing(false),
             ActionOperation::IgnoreBlocks((obj,)) => state.mut_object(obj).set_ignore_barriers(true),
             ActionOperation::StepSize((obj,var)) => {let s=state.get_var(var); state.mut_object(obj).set_step_size(s); },
@@ -2441,6 +2494,10 @@ impl LogicSequence {
                 state.mut_object(obj).set_follow(s, f);
             },
             ActionOperation::Toggle((f,)) => { let b=state.get_flag(f); state.set_flag(f, !b); },
+            ActionOperation::Get((i,)) => state.set_item_location(i,255),
+            ActionOperation::GetV((v,)) => { let i = TypeItem::from(state.get_var(v)); state.set_item_location(&i,255); },
+            ActionOperation::Drop((i,)) => state.set_item_location(i,0),
+
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
 
@@ -2526,7 +2583,8 @@ pub fn command_input(state: &mut LogicState, s: String, max_length: usize, m: &S
     }
     // Go through keyboard buffer and append/remove keys?
     let to_show = m.clone()+new_string.as_str()+state.get_prompt().to_string().as_str();
-    let to_show = to_show + format!("{:indent$}","",indent=(max_length+1) - new_string.len()).as_str();
+    let indent_len = if max_length+1<new_string.len() { 0 } else {(max_length+1) - new_string.len()};
+    let to_show = to_show + format!("{:indent$}","",indent=indent_len).as_str();
     LogicSequence::display_text(resources, state, x, y, &to_show,ink,paper);
     // pull keycodes off 
     (done,new_string)
@@ -2668,7 +2726,13 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
         if state.object(obj_num).get_direction()!=0 {
             // Now perform motion based on direction
             // Collision/rules check here I think
-            let (moved, nx,ny) = update_move(resources,state,obj_num);
+            let (moved, nx,ny,water,signal) = update_move(resources,state,obj_num);
+            if *obj_num == OBJECT_EGO {
+                state.set_flag(&FLAG_EGO_TOUCHED_SIGNAL, signal);
+                state.set_flag(&FLAG_EGO_IN_WATER,water);
+            }
+
+
             state.mut_object(obj_num).set_moved(moved);
             if moved {
                 state.mut_object(obj_num).set_x_fp16(nx);
@@ -2690,11 +2754,12 @@ fn update_edge(state:&mut LogicState,obj_num:&TypeObject,edge:u8) {
     }
 }
 
-pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeObject) -> (bool,FP16,FP16) {
+pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeObject) -> (bool,FP16,FP16,bool,bool) {
 
     let obj=state.object(&obj_num);
+
     if !obj.motion {
-        return (false,FP16::ZERO,FP16::ZERO);
+        return (false,FP16::ZERO,FP16::ZERO,false,false);
     }
     let (dx,dy) = get_delta_fp32_from_direction(obj.get_direction());
     let x=FP32::from(obj.get_x_fp16());
@@ -2727,51 +2792,57 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
         } else {
             update_edge(state,obj_num,1);
         }
-        return (false,FP16::ZERO,FP16::ZERO);
+        return (false,FP16::ZERO,FP16::ZERO,false,false);
     }
-    if tx+w > PIC_WIDTH_USIZE || ty > PIC_HEIGHT_USIZE {
+    if tx+w > PIC_WIDTH_USIZE || ty >= PIC_HEIGHT_USIZE {
         if tx+w > PIC_WIDTH_USIZE {
             update_edge(state,obj_num,2);
         } else {
             update_edge(state,obj_num,3);
         }
 
-        return (false,FP16::ZERO,FP16::ZERO);
+        return (false,FP16::ZERO,FP16::ZERO,false,false);
     }
 
     // horizon check
     if !obj.ignore_horizon {
         if ty < (state.horizon as usize) {
             update_edge(state,obj_num,1);
-            return (false,FP16::ZERO,FP16::ZERO);
+            return (false,FP16::ZERO,FP16::ZERO,false,false);
         }
     }
     // todo checks for other block and sprites?
 
     // scan x+0..x+width-1 and confirm priority as expected
-
+    let mut blocked=false;
+    let mut water=true;
+    let mut signal=false;
     for x in 0..w {
         let pri = fetch_priority_for_pixel(state, tx+x, ty);
+        water&=pri==3;
         if pri == 3 && obj.is_restricted_to_land() {
-            return (false,FP16::ZERO,FP16::ZERO);
+            blocked=true;
         }
         if pri != 3 && obj.is_restricted_to_water() {
-            return (false,FP16::ZERO,FP16::ZERO);
+            blocked=true;
         }
         if pri == 0 {
-            return (false,FP16::ZERO,FP16::ZERO);
+            blocked=true;
         }
         if pri == 1 {
             if obj.is_restricted_by_blocks() {
-                return (false,FP16::ZERO,FP16::ZERO);
+                blocked=true;
             }
         }
         if pri == 2 {
-            println!("Todo - trigger?")
+            signal=true;
         }
     }
 
-    (true, nx, ny)
+    if blocked {
+        return (false,FP16::ZERO,FP16::ZERO,water,signal);
+    }
+    (true, nx, ny, water, signal)
 
 }
 
@@ -2983,9 +3054,14 @@ fn render_view_to_pic(resources: &GameResources, state:&mut LogicState, view:u8,
             }
         }
     }
-    // to do border
+    // render control value
     if margin<4 {
-        println!("TODO : Margin : {}",margin);
+        for xx in 0..w {
+            let sx = xx+x;
+            let sy = y;
+            let coord = sx+sy*PIC_WIDTH_USIZE;
+            state.priority_buffer[coord]=margin;
+        }
     }
 }
 

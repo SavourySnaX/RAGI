@@ -101,8 +101,8 @@ impl TexturesUi {
 }
 
 const KQ1:bool=false;
-const LL1:bool=true;
-const SQ1:bool=false;
+const LL1:bool=false;
+const SQ1:bool=true;
 
 fn main() -> Result<(), String> {
 
@@ -385,6 +385,7 @@ impl Interpretter {
             started:0,
         };
         i.state.set_var(&VAR_TIME_DELAY,2);
+        i.state.initialise_rooms(&i.resources.objects.objects);
         Ok(i)
     }
 
