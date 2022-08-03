@@ -100,9 +100,9 @@ impl TexturesUi {
     }
 }
 
-const KQ1:bool=false;
+const KQ1:bool=true;
 const LL1:bool=false;
-const SQ1:bool=true;
+const SQ1:bool=false;
 
 fn main() -> Result<(), String> {
 
@@ -577,5 +577,7 @@ impl Interpretter {
         }
 
         render_sprites(&self.resources,mutable_state,false);
+
+        mutable_state.render_final_buffer();
     }
 }

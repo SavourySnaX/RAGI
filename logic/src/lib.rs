@@ -556,7 +556,7 @@ pub struct LogicState {
     post_sprites:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
 
     text_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
-
+    final_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
 }
 
 impl Default for LogicState {
@@ -593,7 +593,8 @@ impl LogicState {
             priority_buffer:[4;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
             back_buffer:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
             post_sprites:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
-            text_buffer:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+            text_buffer:[255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+            final_buffer:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
         }
     }
 
@@ -780,9 +781,7 @@ impl LogicState {
 
     pub fn set_text_mode(&mut self,b:bool) {
         self.text_mode=b;
-        if b {
-            self.text_buffer = [0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
-        }
+        self.text_buffer = [255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
     }
 
     pub fn set_status_visible(&mut self,b:bool) {
@@ -842,10 +841,21 @@ impl LogicState {
     }
 
     pub fn final_buffer(&self) -> &[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
+        &self.final_buffer
+    }
+
+    pub fn render_final_buffer(&mut self) {
         if self.text_mode {
-            &self.text_buffer
+            self.final_buffer = [0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
         } else {
-            &self.post_sprites
+            self.final_buffer = self.post_sprites;
+        }
+
+        // Now combine the text buffer
+        for i in 0..SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE {
+            if self.text_buffer[i]!=255 {
+                self.final_buffer[i]=self.text_buffer[i];
+            }
         }
     }
 
@@ -2200,6 +2210,8 @@ impl LogicSequence {
     }
 
     pub fn new_room(resources:&GameResources,state:&mut LogicState,room:u8) {
+        state.text_buffer = [255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
+
         // Stop.update()
         //unanimate.all()
         for (_,obj) in state.mut_active_objects() {
@@ -2358,11 +2370,7 @@ impl LogicSequence {
                 let col = state.get_num(num3);
                 for y in start..=end {
                     for x in 0usize..SCREEN_WIDTH_USIZE {
-                        if state.text_mode {
-                            state.text_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
-                        } else {
-                            state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
-                        }
+                        state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
                     }
                 }
             },
@@ -2513,17 +2521,9 @@ impl LogicSequence {
             let mut bits = s[index];
             for xx in 0..8 {
                 if (bits & 0x80) == 0x80 {
-                    if state.text_mode {
-                        state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = ink;
-                    } else {
-                        state.back_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = ink;
-                    }
+                    state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = ink;
                 } else {
-                    if state.text_mode {
-                        state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = paper;
-                    } else {
-                        state.back_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = paper;
-                    }
+                    state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = paper;
                 }
                 bits<<=1;
             }
