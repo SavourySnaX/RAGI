@@ -544,6 +544,8 @@ pub struct LogicState {
     ink:u8,     // colours for display/get_string/get_num
     paper:u8,
 
+    window:(u16,u8,u16,u8), // Holds the co-ordinates of the message window last drawn
+
     //input
     key_len:usize,
     key_buffer:[u8;256],
@@ -585,6 +587,7 @@ impl LogicState {
             logic_start: [0usize;256],
             num_string: String::from(""),
             prompt:'_',
+            window:(0,0,0,0),
             ink:15,
             paper:0,
             key_len:0,
@@ -2292,8 +2295,6 @@ impl LogicSequence {
             ActionOperation::SetGameID((m,)) => /* TODO RAGI - if needed */{let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetGameID {:?}",m);},
             ActionOperation::ConfigureScreen((a,b,c)) => /* TODO RAGI */ { println!("TODO : ConfigureScreen {:?},{:?},{:?}",a,b,c);},
             ActionOperation::SetKey((a,b,c)) => /* TODO RAGI */ { println!("TODO : SetKey {:?},{:?},{:?}",a,b,c);},
-            ActionOperation::Print((m,)) => /* TODO RAGI */ { let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : Print {}",m); },
-            ActionOperation::PrintV((var,)) => /* TODO RAGI */ { let m=&TypeMessage::from(state.get_var(var)); let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : PrintV {}",m); },
             ActionOperation::SetMenu((m,)) => /* TODO RAGI */ { let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetMenu {}",m); },
             ActionOperation::SetMenuMember((m,c)) => /* TODO RAGI */{ let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetMenuMember {} {}",m,state.get_controller(c)); },
             ActionOperation::SubmitMenu(()) => /* TODO RAGI */ { println!("TODO : SubmitMenu")},
@@ -2505,6 +2506,41 @@ impl LogicSequence {
             ActionOperation::Get((i,)) => state.set_item_location(i,255),
             ActionOperation::GetV((v,)) => { let i = TypeItem::from(state.get_var(v)); state.set_item_location(&i,255); },
             ActionOperation::Drop((i,)) => state.set_item_location(i,0),
+            ActionOperation::Print((m,)) => /* TODO RAGI */ 
+            { 
+                if !Self::is_window_open(state) {
+                    let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); 
+                    Self::display_window(resources, state, m.as_str());
+                    return Some(pc.user_input());
+                } else {
+                    // todo check dialog flag timer thing, for now, any key to exit
+                    let key_pressed = state.key_len>0;
+                    state.clear_keys();
+                    if key_pressed {
+                        Self::close_window(resources, state);
+                    } else {
+                        return Some(pc.user_input());
+                    }
+                }
+            },
+            ActionOperation::PrintV((var,)) => /* TODO RAGI */ 
+            { 
+                if !Self::is_window_open(state) {
+                    let m=&TypeMessage::from(state.get_var(var)); 
+                    let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); 
+                    Self::display_window(resources, state, m.as_str());
+                    return Some(pc.user_input());
+                } else {
+                    // todo check dialog flag timer thing, for now, any key to exit
+                    let key_pressed = state.key_len>0;
+                    state.clear_keys();
+                    if key_pressed {
+                        Self::close_window(resources, state);
+                    } else {
+                        return Some(pc.user_input());
+                    }
+                }
+            },
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
@@ -2535,6 +2571,105 @@ impl LogicSequence {
         let y=y*8;
         for l in s.as_bytes() {
             Self::render_glyph(resources, state, x, y, *l,ink,paper);
+            x+=8;
+        }
+    }
+
+    pub fn open_window(resources:&GameResources,state:&mut LogicState, x0:u16,y0:u8,x1:u16,y1:u8) {
+
+        state.window = (x0,y0,x1,y1);
+
+        // For now, just draw a box of some size
+
+        Self::render_glyph(resources, state, x0*8, y0*8, 218 , 4, 15);
+        Self::render_glyph(resources, state, x1*8, y0*8, 191 , 4, 15);
+        Self::render_glyph(resources, state, x0*8, y1*8, 192 , 4, 15);
+        Self::render_glyph(resources, state, x1*8, y1*8, 217 , 4, 15);
+        for x in (x0+1)..x1 {
+            Self::render_glyph(resources, state, x*8, y0*8, 196 , 4, 15);
+            Self::render_glyph(resources, state, x*8, y1*8, 196 , 4, 15);
+        }
+        for y in (y0+1)..y1 {
+            Self::render_glyph(resources, state, x0*8, y*8, 179 , 4, 15);
+            Self::render_glyph(resources, state, x1*8, y*8, 179 , 4, 15);
+            for x in (x0+1)..x1 {
+                Self::render_glyph(resources, state, x*8, y*8, 32 , 4, 15);
+            }
+        }
+    }
+
+    pub fn is_window_open(state:&LogicState) -> bool {
+        state.window.0!=0 || state.window.1!=0 || state.window.2!=0 || state.window.3!=0
+    }
+
+    pub fn close_window(resources:&GameResources,state:&mut LogicState) {
+        for y in state.window.1..=state.window.3 {
+            for x in state.window.0..=state.window.2 {
+                Self::render_glyph(resources, state, x*8, y*8, 32 , 4, 255);
+            }
+        }
+        state.window = (0,0,0,0);
+    }
+
+    pub fn display_window(resources:&GameResources,state:&mut LogicState, message:&str) {
+
+        // compute window size
+        let mut max_width=0;
+        let mut width=0u16;
+        let mut word_len=0;
+        let mut height=1u8;
+        let mut iter = 0;
+        let bytes = message.as_bytes();
+        let mut splits=[999usize;40];
+
+        while iter < bytes.len() {
+            let c=bytes[iter];
+            if width>=30 {
+                iter-=word_len as usize;
+                splits[(height-1) as usize]=iter;
+                height+=1;
+                width-=word_len;
+                max_width=if max_width < width { width } else {max_width};
+                width=0;
+                word_len=0;
+            } else {
+                if c==b'\n' {
+                    splits[(height-1)as usize]=iter;
+                    height+=1;
+                    width=0;
+                    word_len=0;
+                } else if c==b' ' {
+                    width+=1;
+                    word_len=0;
+                } else {
+                    width+=1;
+                    word_len+=1;
+                }
+                iter+=1;
+            }
+        }
+        max_width=if max_width < width { width } else {max_width};
+
+        height+=1;
+        max_width+=1;
+
+        let y0 = 10 - height/2;
+        let x0 = 20 - max_width/2;
+        let y1 = y0 + height;
+        let x1 = x0 + max_width;
+
+        Self::open_window(resources,state,x0,y0,x1,y1);
+
+        let mut x=(x0+1)*8;
+        let mut y=(y0+1)*8;
+        let mut split_loc=0;
+        for (idx,c) in bytes.iter().enumerate() {
+            if splits[split_loc]==idx {
+                x=(x0+1)*8;
+                y+=8;
+                split_loc+=1;
+            }
+            Self::render_glyph(resources, state, x, y, *c, 0, 15);
             x+=8;
         }
     }

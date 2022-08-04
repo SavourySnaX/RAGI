@@ -487,7 +487,7 @@ impl Interpretter {
         if mutable_state.is_input_enabled() {
             let (done,new_string) = command_input(mutable_state, self.command_input_string.clone(),20,&String::from(">"),&self.resources,0,22,15,0,false);    // not sure if attributes are affected for this
             self.command_input_string = new_string;
-            if done {
+            if done && self.command_input_string.len()>0 {
                 // parse and clear input string
                 parse_input_string(mutable_state, self.command_input_string.clone(), &self.resources);
                 self.command_input_string.clear();
