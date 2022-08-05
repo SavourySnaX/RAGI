@@ -109,6 +109,7 @@ fn main() -> Result<(), String> {
     let mut interpretter:Interpretter;
 
     if KQ1 {
+        //interpretter=Interpretter::new("../images/King's Quest v2.0F (AGI 2.425) (1987)(Sierra On-Line, Inc.) [Adventure]/","2.425").unwrap();
         interpretter=Interpretter::new("../images/King's Quest v1.0U (1986)(Sierra On-Line, Inc.) [Adventure][!]/","2.272").unwrap();
         //interpretter.breakpoints.insert(LogicExecutionPosition::new(53,145), false);
         //interpretter.breakpoints.insert(LogicExecutionPosition::new(53,233), false);
@@ -280,7 +281,7 @@ fn main() -> Result<(), String> {
                             if let Some(g) = g {
                                 let address =LogicExecutionPosition::new(file,g.into());
                                 let mut selected = interpretter.breakpoints.contains_key(&address);
-                                if Selectable::new(format!("{} {:?}",if *top_of_stack==address {">"} else {" "},address)).flags(SelectableFlags::SPAN_ALL_COLUMNS).build_with_ref(&ui,&mut selected) {
+                                if Selectable::new(format!("{} {}",if *top_of_stack==address {">"} else {" "},address)).flags(SelectableFlags::SPAN_ALL_COLUMNS).build_with_ref(&ui,&mut selected) {
                                     if interpretter.breakpoints.contains_key(&address) {
                                         interpretter.breakpoints.remove(&address);
                                     } else {

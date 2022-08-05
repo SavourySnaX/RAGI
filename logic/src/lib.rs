@@ -1120,6 +1120,7 @@ pub enum ActionOperation {
     Distance((TypeObject,TypeObject,TypeVar)),
     StopCycling((TypeObject,)),
     StartCycling((TypeObject,)),
+    NormalCycle((TypeObject,)),
     EndOfLoop((TypeObject,TypeFlag)),
     ReverseLoop((TypeObject,TypeFlag)),
     CycleTime((TypeObject,TypeVar)),
@@ -1504,6 +1505,7 @@ impl LogicResource {
             ActionOperation::ObserveObjs(a) |
             ActionOperation::StopCycling(a) |
             ActionOperation::StartCycling(a) |
+            ActionOperation::NormalCycle(a) |
             ActionOperation::StopMotion(a) |
             ActionOperation::StartMotion(a) |
             ActionOperation::Wander(a) |
@@ -2063,6 +2065,7 @@ impl LogicSequence {
                 0x4C => ActionOperation::CycleTime(Self::parse_object_var(&mut iter)?),
                 0x4B => ActionOperation::ReverseLoop(Self::parse_object_flag(&mut iter)?),
                 0x49 => ActionOperation::EndOfLoop(Self::parse_object_flag(&mut iter)?),
+                0x48 => ActionOperation::NormalCycle((Self::parse_object(&mut iter)?,)),
                 0x47 => ActionOperation::StartCycling((Self::parse_object(&mut iter)?,)),
                 0x46 => ActionOperation::StopCycling((Self::parse_object(&mut iter)?,)),
                 0x45 => ActionOperation::Distance(Self::parse_object_object_var(&mut iter)?),
@@ -2324,18 +2327,19 @@ impl LogicSequence {
 
         match action {
             // Not complete
-            ActionOperation::Sound((_num,flag)) => /* TODO RAGI  - for now, just pretend sound finished*/ state.set_flag(flag,true),
-            ActionOperation::StopSound(()) => /* TODO RAGI - for now, since we complete sounds straight away, does nothing */ {},
-            ActionOperation::SetGameID((m,)) => /* TODO RAGI - if needed */{let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetGameID {:?}",m);},
-            ActionOperation::ConfigureScreen((a,b,c)) => /* TODO RAGI */ { println!("TODO : ConfigureScreen {:?},{:?},{:?}",a,b,c);},
-            ActionOperation::SetKey((a,b,c)) => /* TODO RAGI */ { println!("TODO : SetKey {:?},{:?},{:?}",a,b,c);},
-            ActionOperation::SetMenu((m,)) => /* TODO RAGI */ { let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetMenu {}",m); },
-            ActionOperation::SetMenuMember((m,c)) => /* TODO RAGI */{ let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetMenuMember {} {}",m,state.get_controller(c)); },
-            ActionOperation::SubmitMenu(()) => /* TODO RAGI */ { println!("TODO : SubmitMenu")},
-            ActionOperation::TraceInfo((num1,num2,num3)) => /* TODO RAGI */ { println!("TODO : TraceInfo {} {} {}",state.get_num(num1),state.get_num(num2),state.get_num(num3)); }
-            ActionOperation::DisableMember((c,)) => /* TODO RAGI */ println!("TODO : Disable Member {}", state.get_controller(c)),
-            ActionOperation::CancelLine(()) => /* TODO RAGI */ println!("TODO : CancelLine"),
-            ActionOperation::ForceUpdate((o,)) => /* TODO RAGI */ println!("TODO : ForceUpdate {:?}",o),
+            ActionOperation::Sound((_num,flag)) => /* TODO RAGI  - for now, just pretend sound finished*/ {println!("TODO : Sound@{}",pc); state.set_flag(flag,true);},
+            ActionOperation::StopSound(()) => /* TODO RAGI - for now, since we complete sounds straight away, does nothing */ {println!("TODO : StopSound@{}",pc);},
+            ActionOperation::SetGameID((m,)) => /* TODO RAGI - if needed */{let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetGameID@{} {:?}",pc,m);},
+            ActionOperation::ConfigureScreen((a,b,c)) => /* TODO RAGI */ { println!("TODO : ConfigureScreen@{} {:?},{:?},{:?}",pc,a,b,c);},
+            ActionOperation::SetKey((a,b,c)) => /* TODO RAGI */ { println!("TODO : SetKey@{} {:?},{:?},{:?}",pc,a,b,c);},
+            ActionOperation::SetMenu((m,)) => /* TODO RAGI */ { let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetMenu@{} {}",pc,m); },
+            ActionOperation::SetMenuMember((m,c)) => /* TODO RAGI */{ let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetMenuMember@{} {} {}",pc,m,state.get_controller(c)); },
+            ActionOperation::SubmitMenu(()) => /* TODO RAGI */ { println!("TODO : SubmitMenu@{}",pc)},
+            ActionOperation::TraceInfo((num1,num2,num3)) => /* TODO RAGI */ { println!("TODO : TraceInfo@{} {} {} {}",pc,state.get_num(num1),state.get_num(num2),state.get_num(num3)); }
+            ActionOperation::DisableMember((c,)) => /* TODO RAGI */ println!("TODO : DisableMember@{} {}",pc, state.get_controller(c)),
+            ActionOperation::CancelLine(()) => /* TODO RAGI */ println!("TODO : CancelLine@{}",pc),
+            ActionOperation::ForceUpdate((o,)) => /* TODO RAGI */ println!("TODO : ForceUpdate@{} {:?}",pc,o),
+            ActionOperation::ShakeScreen((num,)) => /* TODO RAGI */ println!("TODO : ShakeScreen@{} {:?}",pc,num),
             
 
             // Not needed
@@ -2868,6 +2872,12 @@ impl LogicExecutionPosition {
         self.program_counter
     }
 
+}
+
+impl fmt::Display for LogicExecutionPosition {
+    fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
+        write!(f,"({:3}:{:3})",self.logic_file,self.program_counter)
+    }
 }
 
 pub fn get_direction_from_delta(dx:i32,dy:i32) -> u8 {
