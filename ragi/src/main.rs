@@ -469,13 +469,15 @@ impl Interpretter {
         let mutable_state = &mut self.state;
         let mutable_stack = &mut self.stack;
 
-        // delay
-        self.started+=mutable_state.get_var(&VAR_TIME_DELAY) as u64;
+        // delay (increment time by delay for now, in future, we should actually delay!)
+        self.started+=(mutable_state.get_var(&VAR_TIME_DELAY)+1) as u64;
         // clear keybuffer
         mutable_state.clear_keys();
 
-        mutable_state.set_flag(&FLAG_COMMAND_ENTERED, false);
-        mutable_state.set_flag(&FLAG_SAID_ACCEPTED_INPUT, false);
+        if !resuming {
+            mutable_state.set_flag(&FLAG_COMMAND_ENTERED, false);
+            mutable_state.set_flag(&FLAG_SAID_ACCEPTED_INPUT, false);
+        }
         // poll keyb/joystick
         for k in &self.keys {
             if (*k as u32) <256 {

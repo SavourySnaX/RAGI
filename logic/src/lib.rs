@@ -48,6 +48,8 @@ pub const FLAG_RESTART_GAME:TypeFlag = type_flag_from_u8(6);
 
 pub const FLAG_RESTORE_GAME:TypeFlag = type_flag_from_u8(12);
 
+pub const FLAG_LEAVE_WINDOW_OPEN:TypeFlag = type_flag_from_u8(15);
+
 type FP16=FixedU16<U8>;
 type FP32=FixedI32<U8>;
 
@@ -389,6 +391,7 @@ impl Sprite {
 
     pub fn set_move(&mut self,x:u8,y:u8,s:u8,f:&TypeFlag) {
         self.set_enable_motion(true);   // to confirm
+        self.set_frozen(false);         // to confirm
         self.motion_kind=SpriteMotion::MoveObj;
         self.ex=FP16::from_num(x);
         self.ey=FP16::from_num(y);
@@ -398,6 +401,7 @@ impl Sprite {
 
     pub fn set_follow(&mut self,s:u8,f:&TypeFlag) {
         self.set_enable_motion(true);   // to confirm
+        self.set_frozen(false);         // to confirm
         self.motion_kind=SpriteMotion::FollowEgo;
         self.move_flag= *f;
         self.set_step_size(s)
@@ -563,6 +567,7 @@ pub struct LogicState {
     paper:u8,
 
     windows:[TextWindow;2], // Holds the co-ordinates of the message window last drawn (and item from show.obj)
+    displayed:String,
 
     //input
     key_len:usize,
@@ -607,6 +612,7 @@ impl LogicState {
             prompt:'_',
             parsed_input_string: String::from(""),
             windows:[();2].map(|_| TextWindow::new()),
+            displayed: String::from(""),
             ink:15,
             paper:0,
             key_len:0,
@@ -766,8 +772,12 @@ impl LogicState {
         self.string[s.value as usize] = m.to_owned();
     }
     
-    pub fn set_prompt(&mut self,c:char) {
-        self.prompt = c;
+    pub fn set_prompt(&mut self,m:&str) {
+        if m.len()>0 {
+            self.prompt = m.chars().next().unwrap();
+        } else {
+            self.prompt=' ';
+        }
     }
 
     pub fn set_ink(&mut self,ink:u8) {
@@ -2425,7 +2435,7 @@ impl LogicSequence {
                 let x=state.get_num(num2); 
                 let y=state.get_num(num1); 
                 let max_length = state.get_num(num3) as usize;
-                let input = state.get_string(s).clone();
+                let input = state.get_string(s).trim_start().to_string().clone();
                 let (done,new_string) = command_input(state, input, max_length, &m, resources, x, y,state.get_ink(),state.get_paper(),false);
 
                 *state.get_mut_string(s)=new_string;
@@ -2457,11 +2467,8 @@ impl LogicSequence {
                 }
 
             },
-            ActionOperation::Parse((s,)) => {
-                // Todo move to method - remove punctuation (assuming we allow it into here in the first place)
-                parse_input_string(state, state.get_string(s).clone(), resources);
-            }
-            ActionOperation::SetCursorChar((m,)) => { let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); state.set_prompt(m.chars().next().unwrap()); },
+            ActionOperation::Parse((s,)) => parse_input_string(state, state.get_string(s).clone(), resources),
+            ActionOperation::SetCursorChar((m,)) => { let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); state.set_prompt(&m); },
             ActionOperation::IgnoreObjs((obj,)) => state.mut_object(obj).set_observing(false),
             ActionOperation::IgnoreBlocks((obj,)) => state.mut_object(obj).set_ignore_barriers(true),
             ActionOperation::StepSize((obj,var)) => {let s=state.get_var(var); state.mut_object(obj).set_step_size(s); },
@@ -2531,43 +2538,63 @@ impl LogicSequence {
             ActionOperation::GetV((v,)) => { let i = TypeItem::from(state.get_var(v)); state.set_item_location(&i,255); },
             ActionOperation::Drop((i,)) => state.set_item_location(i,0),
             ActionOperation::Print((m,)) => { 
+                let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); 
+                if state.displayed != m {
+                    state.displayed = m.clone();
+                    Self::close_windows(resources, state);
+                } 
                 if !Self::is_window_open(state) {
-                    let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); 
                     Self::display_window(resources, state, m.as_str());
-                    return Some(pc.user_input());
+                    if !state.get_flag(&FLAG_LEAVE_WINDOW_OPEN) {
+                        return Some(pc.user_input());
+                    }
                 } else {
                     // todo check dialog flag timer thing, for now, any key to exit
-                    let key_pressed = state.key_len>0;
-                    state.clear_keys();
-                    if key_pressed {
-                        Self::close_windows(resources, state);
-                    } else {
-                        return Some(pc.user_input());
+                    if !state.get_flag(&FLAG_LEAVE_WINDOW_OPEN) {
+                        let key_pressed = state.key_len>0;
+                        state.clear_keys();
+                        if key_pressed {
+                            Self::close_windows(resources, state);
+                        } else {
+                            return Some(pc.user_input());
+                        }
                     }
                 }
             },
             ActionOperation::PrintV((var,)) => { 
+                let m=&TypeMessage::from(state.get_var(var)); 
+                let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); 
+                if state.displayed != m {
+                    state.displayed = m.clone();
+                    Self::close_windows(resources, state);
+                } 
                 if !Self::is_window_open(state) {
-                    let m=&TypeMessage::from(state.get_var(var)); 
-                    let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); 
                     Self::display_window(resources, state, m.as_str());
-                    return Some(pc.user_input());
+                    if !state.get_flag(&FLAG_LEAVE_WINDOW_OPEN) {
+                        return Some(pc.user_input());
+                    }
                 } else {
                     // todo check dialog flag timer thing, for now, any key to exit
-                    let key_pressed = state.key_len>0;
-                    state.clear_keys();
-                    if key_pressed {
-                        Self::close_windows(resources, state);
-                    } else {
-                        return Some(pc.user_input());
+                    if !state.get_flag(&FLAG_LEAVE_WINDOW_OPEN) {
+                        let key_pressed = state.key_len>0;
+                        state.clear_keys();
+                        if key_pressed {
+                            Self::close_windows(resources, state);
+                        } else {
+                            return Some(pc.user_input());
+                        }
                     }
                 }
             },
             ActionOperation::ShowObj((num,)) => {
+                let v = state.get_num(num) as usize;
+                let view = &resources.views[&v];
+                let m = view.get_description();
+                if state.displayed != *m {
+                    state.displayed = m.clone();
+                    Self::close_windows(resources, state);
+                } 
                 if !Self::is_window_open(state) {
-                    let v = state.get_num(num) as usize;
-                    let view = &resources.views[&v];
-                    let m = view.get_description();
                     Self::display_window(resources, state, m.as_str());
                     Self::display_obj(resources, state, view);
 
@@ -2582,6 +2609,10 @@ impl LogicSequence {
                         return Some(pc.user_input());
                     }
                 }
+            },
+            ActionOperation::CloseWindow(()) => {
+                Self::close_windows(resources, state);
+                state.set_flag(&FLAG_LEAVE_WINDOW_OPEN, false);
             }
 
 
@@ -2704,6 +2735,7 @@ impl LogicSequence {
                 if c==b'\n' {
                     splits[(height-1)as usize]=iter;
                     height+=1;
+                    max_width=if max_width < width { width } else {max_width};
                     width=0;
                     word_len=0;
                 } else if c==b' ' {
@@ -2737,8 +2769,10 @@ impl LogicSequence {
                 y+=8;
                 split_loc+=1;
             }
-            Self::render_glyph(resources, state, x, y, *c, 0, 15);
-            x+=8;
+            if *c!=b'\n' {
+                Self::render_glyph(resources, state, x, y, *c, 0, 15);
+                x+=8;
+            }
         }
     }
 
@@ -2763,7 +2797,7 @@ pub fn parse_input_string(state: &mut LogicState, s: String, resources: &GameRes
             }
         }
     }
-    state.set_flag(&FLAG_COMMAND_ENTERED,true);
+    state.set_flag(&FLAG_COMMAND_ENTERED,state.parsed_input_string.len()!=0);
     state.set_flag(&FLAG_SAID_ACCEPTED_INPUT,false);
 }
 
