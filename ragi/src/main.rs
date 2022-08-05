@@ -110,18 +110,18 @@ fn main() -> Result<(), String> {
 
     if KQ1 {
         interpretter=Interpretter::new("../images/King's Quest v1.0U (1986)(Sierra On-Line, Inc.) [Adventure][!]/","2.272").unwrap();
-        interpretter.breakpoints.insert(LogicExecutionPosition::new(53,145), false);
-        interpretter.breakpoints.insert(LogicExecutionPosition::new(53,233), false);
-        interpretter.breakpoints.insert(LogicExecutionPosition::new(53,181), false);
-        interpretter.breakpoints.insert(LogicExecutionPosition::new(53,251), false);
+        //interpretter.breakpoints.insert(LogicExecutionPosition::new(53,145), false);
+        //interpretter.breakpoints.insert(LogicExecutionPosition::new(53,233), false);
+        //interpretter.breakpoints.insert(LogicExecutionPosition::new(53,181), false);
+        //interpretter.breakpoints.insert(LogicExecutionPosition::new(53,251), false);
     } else if LL1 {
         interpretter=Interpretter::new("../images/Leisure Suit Larry in the Land of the Lounge Lizards (1987)(Sierra On-Line, Inc.) [Adventure]/","2.440").unwrap();
-        interpretter.breakpoints.insert(LogicExecutionPosition::new(2,151), false);
-        interpretter.breakpoints.insert(LogicExecutionPosition::new(3,151), false);
-        interpretter.breakpoints.insert(LogicExecutionPosition::new(6,151), false);
+        //interpretter.breakpoints.insert(LogicExecutionPosition::new(2,151), false);
+        //interpretter.breakpoints.insert(LogicExecutionPosition::new(3,151), false);
+        //interpretter.breakpoints.insert(LogicExecutionPosition::new(6,151), false);
 
         //cheat bypass questions
-        interpretter.state.set_flag(&TypeFlag::from(109),true);
+        //interpretter.state.set_flag(&TypeFlag::from(109),true);
     } else if SQ1 {
         interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/","2.089").unwrap();
     } else {
@@ -471,19 +471,10 @@ impl Interpretter {
 
         // delay (increment time by delay for now, in future, we should actually delay!)
         self.started+=(mutable_state.get_var(&VAR_TIME_DELAY)+1) as u64;
-        // clear keybuffer
-        mutable_state.clear_keys();
 
         if !resuming {
             mutable_state.set_flag(&FLAG_COMMAND_ENTERED, false);
             mutable_state.set_flag(&FLAG_SAID_ACCEPTED_INPUT, false);
-        }
-        // poll keyb/joystick
-        for k in &self.keys {
-            if (*k as u32) <256 {
-                mutable_state.set_var(&VAR_CURRENT_KEY,*k as u8);
-                mutable_state.key_pressed(*k as u8);
-            }
         }
 
         if mutable_state.is_input_enabled() {
@@ -493,6 +484,15 @@ impl Interpretter {
                 // parse and clear input string
                 parse_input_string(mutable_state, self.command_input_string.clone(), &self.resources);
                 self.command_input_string.clear();
+            }
+        }
+        
+        // poll keyb/joystick
+        mutable_state.clear_keys();
+        for k in &self.keys {
+            if (*k as u32) <256 {
+                mutable_state.set_var(&VAR_CURRENT_KEY,*k as u8);
+                mutable_state.key_pressed(*k as u8);
             }
         }
 

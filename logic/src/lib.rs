@@ -2816,6 +2816,8 @@ pub fn command_input(state: &mut LogicState, s: String, max_length: usize, m: &S
             _ => {},
         }
     }
+    state.clear_keys();
+    
     // Go through keyboard buffer and append/remove keys?
     let to_show = m.clone()+new_string.as_str()+state.get_prompt().to_string().as_str();
     let indent_len = if max_length+1<new_string.len() { 0 } else {(max_length+1) - new_string.len()};
