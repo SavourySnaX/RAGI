@@ -100,7 +100,8 @@ impl TexturesUi {
     }
 }
 
-const KQ1:bool=true;
+const KQ1:bool=false;
+const KQ2:bool=true;
 const LL1:bool=false;
 const SQ1:bool=false;
 
@@ -115,6 +116,9 @@ fn main() -> Result<(), String> {
         //interpretter.breakpoints.insert(LogicExecutionPosition::new(53,233), false);
         //interpretter.breakpoints.insert(LogicExecutionPosition::new(53,181), false);
         //interpretter.breakpoints.insert(LogicExecutionPosition::new(53,251), false);
+    } else if KQ2 {
+        interpretter=Interpretter::new("../images/King's Quest II- Romancing the Throne v2.1 (1987)(Sierra On-Line, Inc.) [Adventure]/","2.411").unwrap();
+
     } else if LL1 {
         interpretter=Interpretter::new("../images/Leisure Suit Larry in the Land of the Lounge Lizards (1987)(Sierra On-Line, Inc.) [Adventure]/","2.440").unwrap();
         //interpretter.breakpoints.insert(LogicExecutionPosition::new(2,151), false);
@@ -226,8 +230,16 @@ fn main() -> Result<(), String> {
                     let width = cell.get_width() as usize;
                     let width = width * 2;
                     let height = cell.get_height() as _;
-                    textures_ui.update(&gl, index+10, width, height, &rgb);
-                    Image::new(textures_ui.get_generated_texture(index+10),[width as f32,height as f32]).build(&ui);
+                    textures_ui.update(&gl, index*2+10, width, height, &rgb);
+                    Image::new(textures_ui.get_generated_texture(index*2+10),[width as f32,height as f32]).build(&ui);
+                    // And we the priority pixels under this sprites base line please
+                    let x=obj.get_x() as usize;
+                    let y=obj.get_y() as usize;
+                    let w = width/2;
+                    let pri_slice = pri_slice_for_baseline(&interpretter.state, x, y, w);
+                    let rgba = conv_rgba(pri_slice);
+                    textures_ui.update(&gl, index*2+1+10, w,1,&rgba);
+                    Image::new(textures_ui.get_generated_texture(index*2+1+10),[(w as f32)*16.0,16.0]).build(&ui);
                     ui.text_wrapped(format!("{:?}",obj));
                 });
             }

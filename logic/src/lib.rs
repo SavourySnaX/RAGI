@@ -1037,6 +1037,7 @@ pub enum ConditionOperation {
     Said((Vec<TypeWord>,)),
     CompareStrings((TypeString,TypeString)),
     ObjInBox((TypeObject,TypeNum,TypeNum,TypeNum,TypeNum)),
+    CenterPosN((TypeObject,TypeNum,TypeNum,TypeNum,TypeNum)),
     RightPosN((TypeObject,TypeNum,TypeNum,TypeNum,TypeNum)),
 }
 
@@ -1382,6 +1383,7 @@ impl LogicResource {
     pub fn logic_args_disassemble(operation:&ConditionOperation,words:&Words,items:&Objects) -> String {
         return match operation {
             ConditionOperation::RightPosN(a) |
+            ConditionOperation::CenterPosN(a) |
             ConditionOperation::PosN(a) |
             ConditionOperation::ObjInBox(a) => format!("{},{},{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3),Self::param_dis_num(&a.4)),
             ConditionOperation::CompareStrings(a) => format!("{},{}",Self::param_dis_string(&a.0),Self::param_dis_string(&a.1)),
@@ -1896,6 +1898,7 @@ impl LogicSequence {
     fn parse_condition_with_code(iter:&mut std::slice::Iter<u8>, code:u8) -> Result<ConditionOperation, &'static str> {
         match code {
             0x12 => Ok(ConditionOperation::RightPosN(Self::parse_object_num_num_num_num(iter)?)),
+            0x11 => Ok(ConditionOperation::CenterPosN(Self::parse_object_num_num_num_num(iter)?)),
             0x10 => Ok(ConditionOperation::ObjInBox(Self::parse_object_num_num_num_num(iter)?)),
             0x0F => Ok(ConditionOperation::CompareStrings(Self::parse_string_string(iter)?)),
             0x0E => Ok(ConditionOperation::Said((Self::parse_said(iter)?,))),
@@ -1992,7 +1995,7 @@ impl LogicSequence {
                 0x9D => ActionOperation::SetMenuMember(Self::parse_message_controller(&mut iter)?),
                 0x9C => ActionOperation::SetMenu((Self::parse_message(&mut iter)?,)),
                 0x9A => ActionOperation::ClearTextRect(Self::parse_num_num_num_num_num(&mut iter)?),
-                0x97 => if version == "2.089" || version == "2.272" {ActionOperation::PrintAtV0(Self::parse_message_num_num(&mut iter)?) } else if version=="2.440" {ActionOperation::PrintAtV1(Self::parse_message_num_num_num(&mut iter)?)} else {panic!("DAMN")},
+                0x97 => if version == "2.089" || version == "2.272" || version == "2.411" {ActionOperation::PrintAtV0(Self::parse_message_num_num(&mut iter)?) } else if version=="2.440" {ActionOperation::PrintAtV1(Self::parse_message_num_num_num(&mut iter)?)} else {panic!("DAMN")},
                 0x96 => ActionOperation::TraceInfo(Self::parse_num_num_num(&mut iter)?),
                 0x94 => ActionOperation::RepositionToV(Self::parse_object_var_var(&mut iter)?),
                 0x93 => ActionOperation::RepositionTo(Self::parse_object_num_num(&mut iter)?),
@@ -2218,6 +2221,7 @@ impl LogicSequence {
             ConditionOperation::Said((w,)) => state.check_said(w),
             ConditionOperation::CompareStrings(_) => todo!(),
             ConditionOperation::ObjInBox((obj,num1,num2,num3,num4)) => is_left_and_right_edge_in_box(resources,state,obj,num1, num2,num3,num4),
+            ConditionOperation::CenterPosN((obj,num1,num2,num3,num4)) => is_center_edge_in_box(resources, state, obj, num1, num2, num3, num4),
             ConditionOperation::RightPosN((obj,num1,num2,num3,num4)) => is_right_edge_in_box(resources,state,obj,num1,num2,num3,num4),
         }
     }
@@ -2340,6 +2344,7 @@ impl LogicSequence {
             ActionOperation::CancelLine(()) => /* TODO RAGI */ println!("TODO : CancelLine@{}",pc),
             ActionOperation::ForceUpdate((o,)) => /* TODO RAGI */ println!("TODO : ForceUpdate@{} {:?}",pc,o),
             ActionOperation::ShakeScreen((num,)) => /* TODO RAGI */ println!("TODO : ShakeScreen@{} {:?}",pc,num),
+            ActionOperation::PrintAtV0((m,x,y,)) => /* TODO RAGI */ { let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : PrintAtV0@{} {} {},{}",pc,m,state.get_num(x),state.get_num(y)); },
             
 
             // Not needed
@@ -2409,7 +2414,7 @@ impl LogicSequence {
                 let col = state.get_num(num3);
                 for y in start..=end {
                     for x in 0usize..SCREEN_WIDTH_USIZE {
-                        state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
+                        state.text_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
                     }
                 }
             },
@@ -2485,6 +2490,7 @@ impl LogicSequence {
             ActionOperation::AcceptInput(()) => state.set_input(true),
             ActionOperation::StartCycling((obj,)) => state.mut_object(obj).set_cycling(true),
             ActionOperation::ObjectOnWater((obj,)) => state.mut_object(obj).set_restrict_to_water(),
+            ActionOperation::ObjectOnLand((obj,)) => state.mut_object(obj).set_restrict_to_land(),
             ActionOperation::Wander((obj,)) => state.mut_object(obj).set_wander(),
             ActionOperation::StartUpdate((obj,)) => state.mut_object(obj).set_frozen(false),
             ActionOperation::Distance((obj1,obj2,var)) => state.set_var(var,state.object(obj1).distance(state.object(obj2))),
@@ -2617,7 +2623,8 @@ impl LogicSequence {
             ActionOperation::CloseWindow(()) => {
                 Self::close_windows(resources, state);
                 state.set_flag(&FLAG_LEAVE_WINDOW_OPEN, false);
-            }
+            },
+            ActionOperation::GetPriority((obj,var)) => state.set_var(var,state.object(obj).get_priority()),
 
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
@@ -2979,7 +2986,6 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
                 state.set_flag(&FLAG_EGO_IN_WATER,water);
             }
 
-
             state.mut_object(obj_num).set_moved(moved);
             if moved {
                 state.mut_object(obj_num).set_x_fp16(nx);
@@ -2999,6 +3005,13 @@ fn update_edge(state:&mut LogicState,obj_num:&TypeObject,edge:u8) {
         state.set_var(&VAR_OBJ_EDGE,edge);
         state.set_var(&VAR_OBJ_TOUCHED_BORDER,obj_num.value);
     }
+}
+
+pub fn pri_slice_for_baseline(state:&LogicState,x:usize,y:usize,w:usize) -> &[u8] {
+
+    let s = x+y*PIC_WIDTH_USIZE;
+    let e = s + w;
+    &state.priority_buffer[s..e]
 }
 
 pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeObject) -> (bool,FP16,FP16,bool,bool) {
@@ -3064,8 +3077,9 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
     let mut blocked=false;
     let mut water=true;
     let mut signal=false;
-    for x in 0..w {
-        let pri = fetch_priority_for_pixel(state, tx+x, ty);
+    let slice = pri_slice_for_baseline(state, tx, ty, w);
+    for pri in slice {
+        let pri=*pri;
         water&=pri==3;
         if pri == 3 && obj.is_restricted_to_land() {
             blocked=true;
@@ -3087,7 +3101,7 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
     }
 
     if blocked {
-        return (false,FP16::ZERO,FP16::ZERO,water,signal);
+        return (false,nx,ny,water,signal);
     }
     (true, nx, ny, water, signal)
 
