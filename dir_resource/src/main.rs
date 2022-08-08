@@ -6,7 +6,7 @@ fn main() {
 
     let bytes = fs::read("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/LOGDIR").unwrap_or_default();
 
-    let dir = ResourceDirectory::new(bytes.into_iter());
+    let dir = ResourceDirectory::new(bytes);
 
     for (i,iter) in dir.unwrap().into_iter().enumerate() {
         if iter.empty() {

@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 "dir_resource" = { path = "../dir_resource" }
+weezl = "0.1.7"

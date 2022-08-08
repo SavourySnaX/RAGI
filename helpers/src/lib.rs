@@ -115,7 +115,7 @@ pub fn conv_rgba_transparent(data: &Vec<u8>, trans_col:u8) -> Vec<u8> {
     out_vec
 }
 
-use std::fs::{File, self};
+use std::fs::File;
 use std::path::Path;
 use std::io::BufWriter;
 
@@ -140,18 +140,4 @@ pub fn dump_png(filepath: &str, width:u32, height:u32, data: &[u8]) {
     let mut writer = encoder.write_header().unwrap();
 
     writer.write_image_data(data).unwrap(); // Save
-}
-
-pub struct Root<'a> {
-    base_path:&'a Path,
-}
-
-impl<'a> Root<'_> {
-    pub fn new(base_path:&'a str) -> Root {
-        Root {base_path:Path::new(base_path)}
-    }
-
-    pub fn read_data_or_default(&self,file:&str) -> Vec<u8> {
-        fs::read(self.base_path.join(file).into_os_string()).unwrap_or_default()
-    }
 }

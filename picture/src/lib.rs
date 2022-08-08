@@ -1,7 +1,7 @@
-use std::{iter::Peekable, collections::VecDeque};
+use std::collections::VecDeque;
 
-use dir_resource::ResourceDirectoryEntry;
-use volume::Volume;
+use dir_resource::{ResourceDirectoryEntry, ResourceCompression};
+use volume::{Volume, VolumeCache};
 
 pub const PIC_WIDTH_U8:u8 = 160;
 pub const PIC_HEIGHT_U8:u8 = 168;
@@ -11,53 +11,115 @@ pub const PIC_HEIGHT_USIZE:usize = PIC_HEIGHT_U8 as usize;
 pub struct PictureResource
 {
     picture_data:Vec<u8>,
+    compressed:bool,
 }
 
 impl PictureResource {
     pub fn new(volume:&Volume, entry: &ResourceDirectoryEntry) -> Result<PictureResource, String> {
-        let picture_data = volume.fetch_data_slice(entry)?.to_vec();
-        Ok(PictureResource { picture_data })
+        let mut t = VolumeCache::new();
+        let picture_data = volume.fetch_data_slice(&mut t,entry)?.to_vec();
+        let compressed = match entry.compression {
+            ResourceCompression::Picture => true,
+            _ => false,
+        };
+        Ok(PictureResource { picture_data, compressed })
     }
 
     pub fn render_to(&self,picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE]) -> Result<(), String> {
         *picture = [15u8;(PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE) as usize];
         *priority = [4u8;(PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE) as usize];
-        draw_picture(&self.picture_data,picture,priority)?;
+        let mut iter = PictureIterator::new(&self.picture_data,self.compressed);
+        draw_picture(&mut iter,picture,priority)?;
         Ok(())
     }
     pub fn render(&self) -> Result<([u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE]), String> {
         let mut picture = [15u8;(PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE) as usize];
         let mut priority =[4u8;(PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE) as usize];
-        draw_picture(&self.picture_data,&mut picture,&mut priority)?;
+        let mut iter = PictureIterator::new(&self.picture_data,self.compressed);
+        draw_picture(&mut iter,&mut picture,&mut priority)?;
         Ok((picture,priority))
     }
 }
 
-fn draw_picture(picture_data:&[u8], picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE], priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE]) -> Result<(), String> {
+struct PictureIterator<'a> {
+    picture_data:&'a [u8],
+    position:usize,
+    compressed:bool
+}
 
-    let mut volume_iter = picture_data.iter().peekable();
+impl PictureIterator<'_> {
+    pub fn new(data:&[u8],compressed:bool) -> PictureIterator {
+        PictureIterator { picture_data: data, position: 0, compressed }
+    }
+
+    fn fetch_nibble(&mut self) -> Option<u8> {
+        if self.position/2 >= self.picture_data.len() {
+            return None;
+        }
+        let t = self.picture_data[self.position/2];
+        if self.position&1 == 0 {
+            Some(t>>4)
+        } else {
+            Some(t&0xF)
+        }
+    }
+    
+    pub fn next_byte(&mut self) -> Option<u8> {
+        if let Some(first)=self.fetch_nibble() {
+            self.position+=1;
+            if let Some(second)=self.fetch_nibble() {
+                self.position+=1;
+                return Some((first<<4)|second);
+            }
+        }
+        None
+    }
+
+    pub fn next_nibble(&mut self) -> Option<u8> {
+        if !self.compressed {
+            return self.next_byte();
+        }
+        if let Some(n)=self.fetch_nibble() {
+            self.position+=1;
+            return Some(n);
+        }
+        None
+    }
+
+    pub fn peek_byte(&mut self) -> Option<u8> {
+        if let Some(b) = self.next_byte() {
+            self.position-=2;
+            return Some(b);
+        }
+        None
+    }
+
+}
+
+fn draw_picture(picture_iter:&mut PictureIterator, picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE], priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE]) -> Result<(), String> {
 
     let mut colour_pen=15u8;
     let mut priority_pen=4u8;
     let mut colour_on=false;
     let mut priority_on=false;
 
-    let plot_pen_size:u8 = 0;
-    let plot_pen_splatter=false;
-    let plot_pen_rectangle:bool=true;
+    let mut plot_pen_size:u8 = 0;
+    let mut plot_pen_splatter=false;
+    let mut plot_pen_rectangle:bool=true;
 
-    while let Some(b) = volume_iter.next() {
+    while let Some(b) = picture_iter.next_byte() {
         match b {
-            0xF0 => { colour_on=true; colour_pen= *volume_iter.next().unwrap(); },
+            0xF0 => { colour_on=true; colour_pen= picture_iter.next_nibble().unwrap(); },
             0xF1 => { colour_on=false; },
-            0xF2 => { priority_on=true; priority_pen= *volume_iter.next().unwrap(); },
+            0xF2 => { priority_on=true; priority_pen= picture_iter.next_nibble().unwrap(); },
             0xF3 => { priority_on=false; },
-            0xF4 => { alternate_line(picture,priority,colour_on,priority_on,colour_pen,priority_pen,&mut volume_iter, false); }
-            0xF5 => { alternate_line(picture,priority,colour_on,priority_on,colour_pen,priority_pen,&mut volume_iter, true); }
-            0xF6 => { absolute_line(picture,priority,colour_on,priority_on,colour_pen,priority_pen,&mut volume_iter); },
-            0xF7 => { relative_line(picture,priority,colour_on,priority_on,colour_pen,priority_pen,&mut volume_iter); },
-            0xF8 => { fill(picture,priority,colour_on,priority_on,colour_pen,priority_pen,&mut volume_iter); },
-            0xFA => { plot_pen(picture,priority,colour_on,priority_on,colour_pen,priority_pen,plot_pen_size,plot_pen_splatter,plot_pen_rectangle,&mut volume_iter); },
+            0xF4 => { alternate_line(picture,priority,colour_on,priority_on,colour_pen,priority_pen,picture_iter, false); }
+            0xF5 => { alternate_line(picture,priority,colour_on,priority_on,colour_pen,priority_pen,picture_iter, true); }
+            0xF6 => { absolute_line(picture,priority,colour_on,priority_on,colour_pen,priority_pen,picture_iter); },
+            0xF7 => { relative_line(picture,priority,colour_on,priority_on,colour_pen,priority_pen,picture_iter); },
+            0xF8 => { fill(picture,priority,colour_on,priority_on,colour_pen,priority_pen,picture_iter); },
+            0xF9 => { let pstyle = picture_iter.next_byte().unwrap(); plot_pen_size=pstyle&7; plot_pen_rectangle = (pstyle&0x10)==0x10; plot_pen_splatter = (pstyle&0x20)==0x20; }
+            0xFA => { plot_pen(picture,priority,colour_on,priority_on,colour_pen,priority_pen,plot_pen_size,plot_pen_splatter,plot_pen_rectangle,picture_iter); },
 
             0xFF => break,
             _ => return Err(format!("Unhandled control code {:02X}",b)),
@@ -85,22 +147,152 @@ fn rasterise_plot(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&m
 
 }
 
-fn rasterise_plot_pen(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,plot_pen_size:u8,plot_pen_splatter:bool,plot_pen_rectangle:bool,x:i16,y:i16) {
+const CIRCLE_SLICE_0:&[u8] = &[1];
+const CIRCLE_SLICE_1:&[u8] = &[
+    0,0,
+    1,1,
+    0,0];
+const CIRCLE_SLICE_2:&[u8] = &[
+    0,1,0,
+    1,1,1,
+    1,1,1,
+    1,1,1,
+    0,1,0];
+const CIRCLE_SLICE_3:&[u8] = &[
+    0,1,1,0,
+    0,1,1,0,
+    1,1,1,1,
+    1,1,1,1,
+    1,1,1,1,
+    0,1,1,0,
+    0,1,1,0];
+const CIRCLE_SLICE_4:&[u8] = &[
+    0,0,1,0,0,
+    0,1,1,1,0,
+    1,1,1,1,1,
+    1,1,1,1,1,
+    1,1,1,1,1,
+    1,1,1,1,1,
+    1,1,1,1,1,
+    0,1,1,1,0,
+    0,0,1,0,0];
+const CIRCLE_SLICE_5:&[u8] = &[
+    0,0,1,1,0,0,
+    0,1,1,1,1,0,
+    0,1,1,1,1,0,
+    0,1,1,1,1,0,
+    1,1,1,1,1,1,
+    1,1,1,1,1,1,
+    1,1,1,1,1,1,
+    0,1,1,1,1,0,
+    0,1,1,1,1,0,
+    0,1,1,1,1,0,
+    0,0,1,1,0,0];
+const CIRCLE_SLICE_6:&[u8] = &[
+    0,0,1,1,1,0,0,
+    0,1,1,1,1,1,0,
+    0,1,1,1,1,1,0,
+    0,1,1,1,1,1,0,
+    1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,
+    0,1,1,1,1,1,0,
+    0,1,1,1,1,1,0,
+    0,1,1,1,1,1,0,
+    0,0,1,1,1,0,0];
+const CIRCLE_SLICE_7:&[u8] = &[
+    0,0,0,1,1,0,0,0,
+    0,0,1,1,1,1,0,0,
+    0,1,1,1,1,1,1,0,
+    0,1,1,1,1,1,1,0,
+    0,1,1,1,1,1,1,0,
+    1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,
+    0,1,1,1,1,1,1,0,
+    0,1,1,1,1,1,1,0,
+    0,1,1,1,1,1,1,0,
+    0,0,1,1,1,1,0,0,
+    0,0,0,1,1,0,0,0];
 
-    // pen size 0-7
-    if plot_pen_size != 0 {
-        panic!("Pen Sizes > not supported");
+const CIRCLE_SLICE_TABLE:&[&[u8]] = &[CIRCLE_SLICE_0,CIRCLE_SLICE_1,CIRCLE_SLICE_2,CIRCLE_SLICE_3,CIRCLE_SLICE_4,CIRCLE_SLICE_5,CIRCLE_SLICE_6,CIRCLE_SLICE_7];
+
+const TEXTURE_DATA_SLICE:&[u8] = &[
+    0x20, 0x94, 0x02, 0x24, 0x90, 0x82, 0xa4, 0xa2,
+    0x82, 0x09, 0x0a, 0x22, 0x12, 0x10, 0x42, 0x14,
+    0x91, 0x4a, 0x91, 0x11, 0x08, 0x12, 0x25, 0x10,
+    0x22, 0xa8, 0x14, 0x24, 0x00, 0x50, 0x24, 0x04];
+
+const TEXTURE_DATA_BIT_OFFSET:&[u8] = &[
+    0x00, 0x18, 0x30, 0xc4, 0xdc, 0x65, 0xeb, 0x48,
+    0x60, 0xbd, 0x89, 0x04, 0x0a, 0xf4, 0x7d, 0x6d,
+    0x85, 0xb0, 0x8e, 0x95, 0x1f, 0x22, 0x0d, 0xdf,
+    0x2a, 0x78, 0xd5, 0x73, 0x1c, 0xb4, 0x40, 0xa1,
+    0xb9, 0x3c, 0xca, 0x58, 0x92, 0x34, 0xcc, 0xce,
+    0xd7, 0x42, 0x90, 0x0f, 0x8b, 0x7f, 0x32, 0xed,
+    0x5c, 0x9d, 0xc8, 0x99, 0xad, 0x4e, 0x56, 0xa6,
+    0xf7, 0x68, 0xb7, 0x25, 0x82, 0x37, 0x3a, 0x51,
+    0x69, 0x26, 0x38, 0x52, 0x9e, 0x9a, 0x4f, 0xa7,
+    0x43, 0x10, 0x80, 0xee, 0x3d, 0x59, 0x35, 0xcf,
+    0x79, 0x74, 0xb5, 0xa2, 0xb1, 0x96, 0x23, 0xe0,
+    0xbe, 0x05, 0xf5, 0x6e, 0x19, 0xc5, 0x66, 0x49,
+    0xf0, 0xd1, 0x54, 0xa9, 0x70, 0x4b, 0xa4, 0xe2,
+    0xe6, 0xe5, 0xab, 0xe4, 0xd2, 0xaa, 0x4c, 0xe3,
+    0x06, 0x6f, 0xc6, 0x4a, 0x75, 0xa3, 0x97, 0xe1];
+
+fn is_pixel_texture_on(bit_pos:u8) -> (u8,bool) {
+    let byte = bit_pos/8;
+    let bit = 0x80 >> (bit_pos&7);
+    let on = (TEXTURE_DATA_SLICE[byte as usize] & bit) == bit;
+    let ret = bit_pos+1;
+    if ret == 255 {
+        return (0,on);
     }
+    (ret,on)
+}
 
-    if plot_pen_splatter {
-        panic!("Pen Splatter not supported");
-    }
+fn rasterise_plot_pen(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,plot_pen_size:u8,plot_pen_splatter:bool,plot_pen_rectangle:bool,t:u8,x:i16,y:i16) {
 
+    let w = (plot_pen_size as i16)+1;
+    let h = (plot_pen_size as i16)*2+1;
+    let sx = x-(w/2);
+    let sy = y-h/2;
+
+    let mut bit_pos = TEXTURE_DATA_BIT_OFFSET[(t>>1) as usize];
+
+    let mut on:bool;
     if !plot_pen_rectangle {
-        panic!("Circle not supported");
+
+        let circle_pixel = CIRCLE_SLICE_TABLE[plot_pen_size as usize];
+        let mut iter=0;
+        for y in sy..sy+h {
+            for x in sx..sx+w {
+                // check circle from rect shape
+                if circle_pixel[iter]==1 {
+                    (bit_pos,on) = is_pixel_texture_on(bit_pos);
+                    if on || (!plot_pen_splatter) {
+                        rasterise_plot(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x, y);
+                    }
+                }
+                iter+=1;
+            }
+        }
+    } else {
+        // Rectangle renderer 
+        for y in sy..sy+h {
+            for x in sx..sx+w {
+                (bit_pos,on) = is_pixel_texture_on(bit_pos);
+                if on || (!plot_pen_splatter) {
+                    rasterise_plot(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x, y);
+                }
+            }
+        }
     }
 
-    rasterise_plot(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x, y);
 }
 
 
@@ -189,24 +381,23 @@ fn rasterise_fill(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&m
 
 }
 
-fn alternate_line<'a, I>(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,volume_iter:&mut Peekable<I>, startx:bool)
-where I: Iterator<Item = &'a u8> {
+fn alternate_line(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,picture_iter:&mut PictureIterator, startx:bool) {
 
-    let mut x0 = volume_iter.next().unwrap();
-    let mut y0 = volume_iter.next().unwrap();
+    let mut x0 = picture_iter.next_byte().unwrap();
+    let mut y0 = picture_iter.next_byte().unwrap();
 
     let mut x=startx;
     let mut x1= x0;
     let mut y1= y0;
 
-    rasterise_plot(picture, priority, colour_on, priority_on, colour_pen, priority_pen, (*x0).into(), (*y0).into());
+    rasterise_plot(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x0.into(), y0.into());
 
-    while let Some(b) = volume_iter.peek() {
-        if **b >= 0xF0 {
+    while let Some(b) = picture_iter.peek_byte() {
+        if b >= 0xF0 {
             return;
         }
 
-        let n = volume_iter.next().unwrap();
+        let n = picture_iter.next_byte().unwrap();
 
         if x {
             x1 = n;
@@ -215,7 +406,7 @@ where I: Iterator<Item = &'a u8> {
         }
         x= !x;
 
-        rasterise_line(picture, priority, colour_on, priority_on, colour_pen, priority_pen, (*x0).into(), (*y0).into(), (*x1).into(), (*y1).into());
+        rasterise_line(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x0.into(), y0.into(), x1.into(), y1.into());
 
         x0=x1;
         y0=y1;
@@ -223,22 +414,21 @@ where I: Iterator<Item = &'a u8> {
 }
 
 
-fn absolute_line<'a, I>(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,volume_iter:&mut Peekable<I>)
-where I: Iterator<Item = &'a u8> {
+fn absolute_line(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,picture_iter:&mut PictureIterator) {
 
-    let mut x0 = volume_iter.next().unwrap();
-    let mut y0 = volume_iter.next().unwrap();
+    let mut x0 = picture_iter.next_byte().unwrap();
+    let mut y0 = picture_iter.next_byte().unwrap();
 
-    rasterise_plot(picture, priority, colour_on, priority_on, colour_pen, priority_pen, (*x0).into(), (*y0).into());
+    rasterise_plot(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x0.into(), y0.into());
 
-    while let Some(b) = volume_iter.peek() {
-        if **b >= 0xF0 {
+    while let Some(b) = picture_iter.peek_byte() {
+        if b >= 0xF0 {
             return;
         }
-        let x1 = volume_iter.next().unwrap();
-        let y1 = volume_iter.next().unwrap();
+        let x1 = picture_iter.next_byte().unwrap();
+        let y1 = picture_iter.next_byte().unwrap();
 
-        rasterise_line(picture, priority, colour_on, priority_on, colour_pen, priority_pen, (*x0).into(), (*y0).into(), (*x1).into(), (*y1).into());
+        rasterise_line(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x0.into(), y0.into(),x1.into(),y1.into());
 
         x0=x1;
         y0=y1;
@@ -253,19 +443,18 @@ fn decode_relative(rel:u8) -> i16 {
     }
 }
 
-fn relative_line<'a, I>(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,volume_iter:&mut Peekable<I>)
-where I: Iterator<Item = &'a u8> {
+fn relative_line(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,picture_iter:&mut PictureIterator) {
 
-    let mut x0 = *volume_iter.next().unwrap() as i16;
-    let mut y0 = *volume_iter.next().unwrap() as i16;
+    let mut x0 = picture_iter.next_byte().unwrap() as i16;
+    let mut y0 = picture_iter.next_byte().unwrap() as i16;
 
     rasterise_plot(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x0,y0);
 
-    while let Some(b) = volume_iter.peek() {
-        if **b >= 0xF0 {
+    while let Some(b) = picture_iter.peek_byte() {
+        if b >= 0xF0 {
             return;
         }
-        let rel = volume_iter.next().unwrap();
+        let rel = picture_iter.next_byte().unwrap();
         let x1 = x0 + decode_relative(rel>>4);
         let y1 = y0 + decode_relative(rel&0x0F);
 
@@ -277,37 +466,35 @@ where I: Iterator<Item = &'a u8> {
 }
 
 
-fn fill<'a, I>(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,volume_iter:&mut Peekable<I>)
-where I: Iterator<Item = &'a u8> {
+fn fill(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,picture_iter:&mut PictureIterator) {
 
-    while let Some(b) = volume_iter.peek() {
-        if **b >= 0xF0 {
+    while let Some(b) = picture_iter.peek_byte() {
+        if b >= 0xF0 {
             return;
         }
-        let x = volume_iter.next().unwrap();
-        let y = volume_iter.next().unwrap();
+        let x = picture_iter.next_byte().unwrap();
+        let y = picture_iter.next_byte().unwrap();
 
         if colour_on || priority_on {
-            rasterise_fill(picture, priority, colour_on, priority_on, colour_pen, priority_pen, *x, *y);
+            rasterise_fill(picture, priority, colour_on, priority_on, colour_pen, priority_pen, x, y);
         }
     }
 }
 
-fn plot_pen<'a, I>(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,plot_pen_size:u8,plot_pen_splatter:bool,plot_pen_rectangle:bool,volume_iter:&mut Peekable<I>)
-where I: Iterator<Item = &'a u8> {
+fn plot_pen(picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],colour_on:bool,priority_on:bool,colour_pen:u8,priority_pen:u8,plot_pen_size:u8,plot_pen_splatter:bool,plot_pen_rectangle:bool,picture_iter:&mut PictureIterator) {
 
-    if plot_pen_splatter {
-        panic!("Splatter pen not implemented");
-    }
-
-    while let Some(b) = volume_iter.peek() {
-        if **b >= 0xF0 {
+    while let Some(b) = picture_iter.peek_byte() {
+        if b >= 0xF0 {
             return;
         }
-        let x = volume_iter.next().unwrap();
-        let y = volume_iter.next().unwrap();
+        let mut t = 0u8;
+        if plot_pen_splatter {
+            t = picture_iter.next_byte().unwrap();
+        }
+        let x = picture_iter.next_byte().unwrap();
+        let y = picture_iter.next_byte().unwrap();
 
-        rasterise_plot_pen(picture, priority, colour_on, priority_on, colour_pen, priority_pen, plot_pen_size, plot_pen_splatter, plot_pen_rectangle, (*x).into(), (*y).into());
+        rasterise_plot_pen(picture, priority, colour_on, priority_on, colour_pen, priority_pen, plot_pen_size, plot_pen_splatter, plot_pen_rectangle, t, x.into(), y.into());
     }
 
 }

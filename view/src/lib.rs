@@ -1,5 +1,5 @@
 use dir_resource::ResourceDirectoryEntry;
-use volume::Volume;
+use volume::{Volume, VolumeCache};
 
 pub struct ViewCel {
     width:u8,
@@ -51,7 +51,8 @@ impl ViewLoop {
 
 impl ViewResource {
     pub fn new(volume:&Volume, entry: &ResourceDirectoryEntry) -> Result<ViewResource, String> {
-        let slice = volume.fetch_data_slice(entry)?;
+        let mut t=VolumeCache::new();
+        let slice = volume.fetch_data_slice(&mut t,entry)?;
         let slice_iter = slice.iter();
 
         // Read in header (skip first 2 bytes as they are unknown)

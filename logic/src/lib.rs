@@ -1,14 +1,14 @@
 use std::{collections::{HashMap, VecDeque}, hash::Hash, ops, fmt, fs};
 
-use dir_resource::{ResourceDirectoryEntry, ResourceDirectory};
+use dir_resource::{ResourceDirectoryEntry, ResourceDirectory, Root};
 use fixed::{FixedU16, types::extra::U8, FixedI32};
-use helpers::{Root, double_pic_width};
+use helpers::double_pic_width;
 use itertools::Itertools;
 use objects::{Objects, Object};
 use picture::*;
 use rand::{Rng, prelude::ThreadRng};
 use view::{ViewResource, ViewCel, ViewLoop};
-use volume::Volume;
+use volume::{Volume, VolumeCache};
 use words::Words;
 
 use strum_macros::IntoStaticStr;
@@ -466,11 +466,11 @@ impl GameResources {
         // hack for font
         let font = fs::read("../images/BM.PSF").unwrap();
 
-        let root = Root::new(base_path);
+        let root = Root::new(base_path,version);
     
         let mut volumes:HashMap<u8,Volume>=HashMap::new();
 
-        let dir = ResourceDirectory::new(root.read_data_or_default("VIEWDIR").into_iter()).unwrap();
+        let dir = ResourceDirectory::new(root.read_data_or_default("VIEWDIR")).unwrap();
 
         let mut views:HashMap<usize,ViewResource> = HashMap::new();
         views.reserve(256);
@@ -485,7 +485,7 @@ impl GameResources {
         }
         views.shrink_to_fit();
 
-        let dir = ResourceDirectory::new(root.read_data_or_default("PICDIR").into_iter()).unwrap();
+        let dir = ResourceDirectory::new(root.read_data_or_default("PICDIR")).unwrap();
 
         let mut pictures:HashMap<usize,PictureResource> = HashMap::new();
         pictures.reserve(256);
@@ -500,7 +500,7 @@ impl GameResources {
         }
         pictures.shrink_to_fit();
 
-        let dir = ResourceDirectory::new(root.read_data_or_default("LOGDIR").into_iter()).unwrap();
+        let dir = ResourceDirectory::new(root.read_data_or_default("LOGDIR")).unwrap();
 
         let mut logic:HashMap<usize,LogicResource> = HashMap::new();
         logic.reserve(256);
@@ -1289,7 +1289,8 @@ impl LogicMessages {
 impl LogicResource {
     pub fn new(volume:&Volume, entry: &ResourceDirectoryEntry, version:&str) -> Result<LogicResource, &'static str> {
 
-        let slice = volume.fetch_data_slice(entry).expect("Expected to be able to fetch slice from entry");
+        let mut t=VolumeCache::new();
+        let slice = volume.fetch_data_slice(&mut t,entry).expect("Expected to be able to fetch slice from entry");
         let mut slice_iter = slice.iter();
 
         let lsb_pos = slice_iter.next().unwrap();

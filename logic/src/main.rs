@@ -5,7 +5,7 @@ use std::{path::Path};
 use dir_resource::{ResourceDirectory, ResourceDirectoryEntry};
 use logic::LogicResource;
 use objects::Objects;
-use volume::Volume;
+use volume::{Volume, VolumeCache};
 use words::Words;
 
 struct Root<'a> {
@@ -41,7 +41,7 @@ fn main() {
 
     let bytes = fs::read(root.base_path.join("LOGDIR").into_os_string()).unwrap_or_default();
 
-    let dir = ResourceDirectory::new(bytes.into_iter()).unwrap();
+    let dir = ResourceDirectory::new(bytes).unwrap();
 
     for (index,entry) in dir.into_iter().enumerate() {
         if !entry.empty() {
@@ -56,9 +56,10 @@ fn dump_logic_resource(root:&Root,entry:&ResourceDirectoryEntry,index:usize,item
 
     let bytes = fs::read(root.base_path.join(format!("VOL.{}", entry.volume)).into_os_string()).unwrap_or_default();
 
+    let mut t = VolumeCache::new();
     let volume = Volume::new(bytes.into_iter()).unwrap();
 
-    let data = volume.fetch_data_slice(entry).unwrap();
+    let data = volume.fetch_data_slice(&mut t,entry).unwrap();
 
     fs::write(format!("../{}-binary.bin",index).as_str(),data).unwrap();
 
