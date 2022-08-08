@@ -58,9 +58,6 @@ mod tests {
 
 #[derive(Eq)]
 pub struct ResourcesVersion {
-    major:u8,
-    minor:u16,
-    patch:u16,
     comparing:u64,
 }
 
@@ -87,7 +84,7 @@ impl ResourcesVersion {
         let comparing = (major as u64)<<32;
         let comparing = comparing + (minor as u64)<<16;
         let comparing = comparing + (patch as u64);
-        ResourcesVersion { major, minor, patch, comparing }
+        ResourcesVersion { comparing }
     }
 }
 
@@ -227,7 +224,7 @@ impl Index<usize> for ResourceDirectory {
 //todo get Words,Objects,etc
 impl ResourceDirectory {
 
-    pub fn real_new(root:&Root,resource_type:ResourceType) -> Result<ResourceDirectory, &'static str> {
+    pub fn new(root:&Root,resource_type:ResourceType) -> Result<ResourceDirectory, &'static str> {
 
         let directory_name = match resource_type {
             ResourceType::Objects | ResourceType::Words => panic!("We should never request resource directory for these resource types"),
@@ -237,7 +234,7 @@ impl ResourceDirectory {
         };
         if root.file_exists(directory_name) {
             let bytes = root.read_data_or_default(directory_name);
-            return ResourceDirectory::new(bytes);
+            return ResourceDirectory::new_v2(bytes);
         }
 
         // Presumably we are looking at a v3 directory resource
@@ -247,8 +244,7 @@ impl ResourceDirectory {
         Err("Oh dear")
     }
 
-    // rename new_v2 and private
-    pub fn new(mut bytes: Vec<u8>) -> Result<ResourceDirectory, &'static str> {
+    fn new_v2(bytes: Vec<u8>) -> Result<ResourceDirectory, &'static str> {
 
         let mut entries = Vec::new();
         let mut bytes = bytes.into_iter();
@@ -276,7 +272,7 @@ impl ResourceDirectory {
         Ok(ResourceDirectory{entries,resource_type:ResourceType::Pictures})
     }
 
-    fn new_v3(mut bytes: Vec<u8>,resource_type:ResourceType) -> Result<ResourceDirectory, &'static str> {
+    fn new_v3(bytes: Vec<u8>,resource_type:ResourceType) -> Result<ResourceDirectory, &'static str> {
 
         let mut entries = Vec::new();
         let mut bytes = bytes.into_iter();

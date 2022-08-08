@@ -1,6 +1,6 @@
 use std::{collections::{HashMap, VecDeque}, hash::Hash, ops, fmt, fs};
 
-use dir_resource::{ResourceDirectoryEntry, ResourceDirectory, Root, ResourcesVersion, ResourceCompression};
+use dir_resource::{ResourceDirectoryEntry, ResourceDirectory, Root, ResourcesVersion, ResourceCompression, ResourceType};
 use fixed::{FixedU16, types::extra::U8, FixedI32};
 use helpers::double_pic_width;
 use itertools::Itertools;
@@ -470,14 +470,14 @@ impl GameResources {
     
         let mut volumes:HashMap<u8,Volume>=HashMap::new();
 
-        let dir = ResourceDirectory::new(root.read_data_or_default("VIEWDIR")).unwrap();
+        let dir = ResourceDirectory::new(&root,ResourceType::Views).unwrap();
 
         let mut views:HashMap<usize,ViewResource> = HashMap::new();
         views.reserve(256);
         for (index,entry) in dir.into_iter().enumerate() {
             if !entry.empty() {
                 if let std::collections::hash_map::Entry::Vacant(e) =volumes.entry(entry.volume) {
-                    let bytes = root.read_data_or_default(format!("VOL.{}", entry.volume).as_str());
+                    let bytes = root.fetch_volume(&entry);
                     e.insert(Volume::new(bytes.into_iter())?);
                 }
                 views.insert(index, ViewResource::new(&volumes[&entry.volume],&entry)?);
@@ -485,14 +485,14 @@ impl GameResources {
         }
         views.shrink_to_fit();
 
-        let dir = ResourceDirectory::new(root.read_data_or_default("PICDIR")).unwrap();
+        let dir = ResourceDirectory::new(&root, ResourceType::Pictures).unwrap();
 
         let mut pictures:HashMap<usize,PictureResource> = HashMap::new();
         pictures.reserve(256);
         for (index,entry) in dir.into_iter().enumerate() {
             if !entry.empty() {
                 if let std::collections::hash_map::Entry::Vacant(e) = volumes.entry(entry.volume) {
-                    let bytes = root.read_data_or_default(format!("VOL.{}", entry.volume).as_str());
+                    let bytes = root.fetch_volume(&entry);
                     e.insert(Volume::new(bytes.into_iter())?);
                 }
                 pictures.insert(index, PictureResource::new(&volumes[&entry.volume],&entry)?);
@@ -500,14 +500,14 @@ impl GameResources {
         }
         pictures.shrink_to_fit();
 
-        let dir = ResourceDirectory::new(root.read_data_or_default("LOGDIR")).unwrap();
+        let dir = ResourceDirectory::new(&root, ResourceType::Logic).unwrap();
 
         let mut logic:HashMap<usize,LogicResource> = HashMap::new();
         logic.reserve(256);
         for (index,entry) in dir.into_iter().enumerate() {
             if !entry.empty() {
                 if let std::collections::hash_map::Entry::Vacant(e) = volumes.entry(entry.volume) {
-                    let bytes = root.read_data_or_default(format!("VOL.{}", entry.volume).as_str());
+                    let bytes = root.fetch_volume(&entry);
                     e.insert(Volume::new(bytes.into_iter())?);
                 }
                 logic.insert(index, LogicResource::new(&volumes[&entry.volume],&entry,&ResourcesVersion::new(version))?);

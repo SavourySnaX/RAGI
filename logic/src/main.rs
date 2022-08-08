@@ -31,7 +31,7 @@ fn main() {
         Err(_) => panic!("!"),//Words::blank(),
     };
 
-    let dir = ResourceDirectory::real_new(&root, ResourceType::Logic).unwrap();
+    let dir = ResourceDirectory::new(&root, ResourceType::Logic).unwrap();
 
     for (index,entry) in dir.into_iter().enumerate() {
         if !entry.empty() {

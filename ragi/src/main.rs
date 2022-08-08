@@ -101,9 +101,11 @@ impl TexturesUi {
 }
 
 const KQ1:bool=false;
-const KQ2:bool=true;
+const KQ2:bool=false;
 const LL1:bool=false;
 const SQ1:bool=false;
+const GR:bool =true;
+const BC:bool =false;
 
 fn main() -> Result<(), String> {
 
@@ -129,6 +131,11 @@ fn main() -> Result<(), String> {
         //interpretter.state.set_flag(&TypeFlag::from(109),true);
     } else if SQ1 {
         interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/","2.089").unwrap();
+    } else if GR {
+        interpretter=Interpretter::new("../images/Gold Rush! v2.01 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.149").unwrap();
+        interpretter.breakpoints.insert(LogicExecutionPosition::new(132,11), false);
+    } else if BC {
+        interpretter=Interpretter::new("../images/Black Cauldron, The v2.10 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.098").unwrap();
     } else {
         panic!("NO GAME SET");
     }
