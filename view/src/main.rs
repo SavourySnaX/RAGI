@@ -11,6 +11,7 @@ fn main() {
     //let root = Root::new("../images/Leisure Suit Larry in the Land of the Lounge Lizards (1987)(Sierra On-Line, Inc.) [Adventure]/");
     //let root = Root::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/","2.089");
     let root = Root::new("../images/Gold Rush! v2.01 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.149");
+    //let root = Root::new("../images/Black Cauldron, The v2.10 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.098");
     let dir = ResourceDirectory::real_new(&root, ResourceType::Views).unwrap();
 
     for (index,entry) in dir.into_iter().enumerate() {

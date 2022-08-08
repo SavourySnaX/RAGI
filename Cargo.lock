@@ -587,7 +587,6 @@ name = "volume"
 version = "0.1.0"
 dependencies = [
  "dir_resource",
- "weezl",
 ]
 
 [[package]]
@@ -659,12 +658,6 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
 ]
-
-[[package]]
-name = "weezl"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9193164d4de03a926d909d3bc7c30543cecb35400c02114792c2cae20d5e2dbb"
 
 [[package]]
 name = "winapi"
