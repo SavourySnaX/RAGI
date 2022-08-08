@@ -3,7 +3,7 @@ use std::{ops::Index, path::Path, fs, cmp::Ordering};
 #[cfg(test)]
 mod tests {
     use crate::ResourceDirectory;
-
+/*
     #[test]
     fn construct_ok0() {
         assert!(ResourceDirectory::new(vec![0u8;0]).is_ok());
@@ -52,7 +52,7 @@ mod tests {
         let d = ResourceDirectory::new(vec![0u8;3]).unwrap();
         assert!(!d.get(0).unwrap().empty());
     }
-
+*/
 }
 
 
