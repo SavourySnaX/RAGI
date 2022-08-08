@@ -1,6 +1,6 @@
 use std::{collections::{HashMap, VecDeque}, hash::Hash, ops, fmt, fs};
 
-use dir_resource::{ResourceDirectoryEntry, ResourceDirectory, Root};
+use dir_resource::{ResourceDirectoryEntry, ResourceDirectory, Root, ResourcesVersion, ResourceCompression};
 use fixed::{FixedU16, types::extra::U8, FixedI32};
 use helpers::double_pic_width;
 use itertools::Itertools;
@@ -510,7 +510,7 @@ impl GameResources {
                     let bytes = root.read_data_or_default(format!("VOL.{}", entry.volume).as_str());
                     e.insert(Volume::new(bytes.into_iter())?);
                 }
-                logic.insert(index, LogicResource::new(&volumes[&entry.volume],&entry,version)?);
+                logic.insert(index, LogicResource::new(&volumes[&entry.volume],&entry,&ResourcesVersion::new(version))?);
             }
         }
         logic.shrink_to_fit();
@@ -1135,6 +1135,7 @@ pub enum ActionOperation {
     Wander((TypeObject,)),
     NormalMotion((TypeObject,)),
     SetDir((TypeObject,TypeVar)),
+    GetDir((TypeObject,TypeVar)),
     IgnoreBlocks((TypeObject,)),
     ObserveBlocks((TypeObject,)),
     Block((TypeNum,TypeNum,TypeNum,TypeNum)),
@@ -1197,6 +1198,8 @@ pub enum ActionOperation {
     TraceInfo((TypeNum,TypeNum,TypeNum)),
     PrintAtV0((TypeMessage,TypeNum,TypeNum)),
     PrintAtV1((TypeMessage,TypeNum,TypeNum,TypeNum)),
+    PrintAtVV0((TypeVar,TypeNum,TypeNum)),
+    PrintAtVV1((TypeVar,TypeNum,TypeNum,TypeNum)),
     ClearTextRect((TypeNum,TypeNum,TypeNum,TypeNum,TypeNum)),
     SetMenu((TypeMessage,)),
     SetMenuMember((TypeMessage,TypeController)),
@@ -1212,7 +1215,8 @@ pub enum ActionOperation {
 }
 
 impl LogicMessages {
-    fn new(text_slice: &[u8]) -> Result<LogicMessages,&'static str> {
+    fn new(text_slice: &[u8],compression:ResourceCompression) -> Result<LogicMessages,&'static str> {
+
         // unpack the text data first
         let mut strings:Vec<String> = vec!["".to_string()]; // Push [0] "" string, since messages start counting from 1
 
@@ -1255,8 +1259,11 @@ impl LogicMessages {
             let position = position + (*lsb_pos as usize);
             messages.push(position);
         }
-        let decrypt = "Avis Durgan";
-        //let decrypt = "Alex Simkin";
+        let decrypt = match compression {
+            ResourceCompression::None => "Avis Durgan",     // TODO Alex Simkin detection
+            ResourceCompression::LZW => "\0",
+            ResourceCompression::Picture => panic!("This should never occur"),
+        };
         let decrypt_start_adjust = decrypt_start_adjust + messages.len()*2;
         let message_block_slice = &text_slice[1..];
         for m in messages {
@@ -1287,10 +1294,11 @@ impl LogicMessages {
 }
 
 impl LogicResource {
-    pub fn new(volume:&Volume, entry: &ResourceDirectoryEntry, version:&str) -> Result<LogicResource, &'static str> {
+    pub fn new(volume:&Volume, entry: &ResourceDirectoryEntry, version:&ResourcesVersion) -> Result<LogicResource, &'static str> {
 
         let mut t=VolumeCache::new();
-        let slice = volume.fetch_data_slice(&mut t,entry).expect("Expected to be able to fetch slice from entry");
+        let data_slice = volume.fetch_data_slice(&mut t,entry).expect("Expected to be able to fetch slice from entry");
+        let slice = data_slice.0;
         let mut slice_iter = slice.iter();
 
         let lsb_pos = slice_iter.next().unwrap();
@@ -1303,8 +1311,8 @@ impl LogicResource {
         let logic_slice = &slice[2..text_start+2];
         let text_slice = &slice[text_start+2..];
 
-        let logic_messages = LogicMessages::new(text_slice).expect("Failed to ");
-        let logic_sequence = LogicSequence::new(logic_slice,version).expect("fsjkdfhksdjf");
+        let logic_messages = LogicMessages::new(text_slice,data_slice.1).expect("Error : ");
+        let logic_sequence = LogicSequence::new(logic_slice,version).expect("Error : ");
 
         Ok(LogicResource {logic_sequence, logic_messages})
     }
@@ -1556,6 +1564,7 @@ impl LogicResource {
             ActionOperation::CycleTime(a) |
             ActionOperation::StepSize(a) |
             ActionOperation::StepTime(a) |
+            ActionOperation::GetDir(a) |
             ActionOperation::SetDir(a) => format!("{},{}",Self::param_dis_object(&a.0),Self::param_dis_var(&a.1)),
             ActionOperation::EndOfLoop(a) |
             ActionOperation::ReverseLoop(a) => format!("{},{}",Self::param_dis_object(&a.0),Self::param_dis_flag(&a.1)),
@@ -1577,8 +1586,10 @@ impl LogicResource {
             ActionOperation::Reposition(a) => format!("{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_var(&a.1),Self::param_dis_var(&a.2)),
             ActionOperation::Distance(a) => format!("{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_object(&a.1),Self::param_dis_var(&a.2)),
             ActionOperation::FollowEgo(a) => format!("{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_num(&a.1),Self::param_dis_flag(&a.2)),
+            ActionOperation::PrintAtVV0(a) => format!("{},{},{}",Self::param_dis_var(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2)),
             ActionOperation::PrintAtV0(a) => format!("{},{},{}",self.param_dis_message(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2)),
             ActionOperation::Block(a) => format!("{},{},{},{}",Self::param_dis_num(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3)),
+            ActionOperation::PrintAtVV1(a) => format!("{},{},{},{}",Self::param_dis_var(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3)),
             ActionOperation::PrintAtV1(a) => format!("{},{},{},{}",self.param_dis_message(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3)),
             ActionOperation::ClearTextRect(a) => format!("{},{},{},{},{}",Self::param_dis_num(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3),Self::param_dis_num(&a.4)),
             ActionOperation::MoveObj(a) => format!("{},{},{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3),Self::param_dis_flag(&a.4)),
@@ -1844,6 +1855,10 @@ impl LogicSequence {
         Ok((Self::parse_object(iter)?,Self::parse_object(iter)?,Self::parse_var(iter)?))
     }
 
+    fn parse_var_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeVar,TypeNum,TypeNum), &'static str> {
+        Ok((Self::parse_var(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?))
+    }
+
     fn parse_message_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeMessage,TypeNum,TypeNum), &'static str> {
         Ok((Self::parse_message(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?))
     }
@@ -1858,6 +1873,10 @@ impl LogicSequence {
 
     fn parse_object_num_flag(iter:&mut std::slice::Iter<u8>) -> Result<(TypeObject,TypeNum,TypeFlag), &'static str> {
         Ok((Self::parse_object(iter)?,Self::parse_num(iter)?,Self::parse_flag(iter)?))
+    }
+
+    fn parse_var_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeVar,TypeNum,TypeNum,TypeNum), &'static str> {
+        Ok((Self::parse_var(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?,Self::parse_num(iter)?))
     }
 
     fn parse_message_num_num_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeMessage,TypeNum,TypeNum,TypeNum), &'static str> {
@@ -1964,7 +1983,7 @@ impl LogicSequence {
         Ok((conditions,pos))
     }
 
-    fn new(logic_slice: &[u8],version:&str) -> Result<LogicSequence,&'static str> {
+    fn new(logic_slice: &[u8],version:&ResourcesVersion) -> Result<LogicSequence,&'static str> {
 
         let mut iter = logic_slice.iter();
 
@@ -1972,6 +1991,9 @@ impl LogicSequence {
         let mut offsets:HashMap<TypeGoto, usize>=HashMap::new();
         let mut offsets_rev:HashMap<usize, TypeGoto>=HashMap::new();
         let initial_size = logic_slice.len();
+
+        let version_2089 = &ResourcesVersion::new("2.089");
+        let version_2400 = &ResourcesVersion::new("2.400");
 
         operations.reserve(initial_size);  // over allocate then shrink to fit at end of process (over allocates,because there are operands mixed into the stream)
         offsets.reserve(initial_size);
@@ -1996,7 +2018,8 @@ impl LogicSequence {
                 0x9D => ActionOperation::SetMenuMember(Self::parse_message_controller(&mut iter)?),
                 0x9C => ActionOperation::SetMenu((Self::parse_message(&mut iter)?,)),
                 0x9A => ActionOperation::ClearTextRect(Self::parse_num_num_num_num_num(&mut iter)?),
-                0x97 => if version == "2.089" || version == "2.272" || version == "2.411" {ActionOperation::PrintAtV0(Self::parse_message_num_num(&mut iter)?) } else if version=="2.440" {ActionOperation::PrintAtV1(Self::parse_message_num_num_num(&mut iter)?)} else {panic!("DAMN")},
+                0x98 => if version >= version_2089 && version <= version_2400 {ActionOperation::PrintAtVV0(Self::parse_var_num_num(&mut iter)?) } else {ActionOperation::PrintAtVV1(Self::parse_var_num_num_num(&mut iter)?)},
+                0x97 => if version >= version_2089 && version <= version_2400 {ActionOperation::PrintAtV0(Self::parse_message_num_num(&mut iter)?) } else {ActionOperation::PrintAtV1(Self::parse_message_num_num_num(&mut iter)?)},
                 0x96 => ActionOperation::TraceInfo(Self::parse_num_num_num(&mut iter)?),
                 0x94 => ActionOperation::RepositionToV(Self::parse_object_var_var(&mut iter)?),
                 0x93 => ActionOperation::RepositionTo(Self::parse_object_num_num(&mut iter)?),
@@ -2012,7 +2035,7 @@ impl LogicSequence {
                 0x89 => ActionOperation::EchoLine(()),
                 0x88 => ActionOperation::Pause(()),
                 0x87 => ActionOperation::ShowMem(()),
-                0x86 => if version == "2.089" { ActionOperation::QuitV0(()) } else { ActionOperation::QuitV1((Self::parse_num(&mut iter)?,))},  // Check me, i`m not sure only 2.089 for V0.. see KQI
+                0x86 => if version == version_2089 { ActionOperation::QuitV0(()) } else { ActionOperation::QuitV1((Self::parse_num(&mut iter)?,))},
                 0x85 => ActionOperation::ObjStatusV((Self::parse_var(&mut iter)?,)),
                 0x84 => ActionOperation::PlayerControl(()),
                 0x83 => ActionOperation::ProgramControl(()),
@@ -2056,6 +2079,7 @@ impl LogicSequence {
                 0x5A => ActionOperation::Block(Self::parse_num_num_num_num(&mut iter)?),
                 0x59 => ActionOperation::ObserveBlocks((Self::parse_object(&mut iter)?,)),
                 0x58 => ActionOperation::IgnoreBlocks((Self::parse_object(&mut iter)?,)),
+                0x57 => ActionOperation::GetDir(Self::parse_object_var(&mut iter)?),
                 0x56 => ActionOperation::SetDir(Self::parse_object_var(&mut iter)?),
                 0x55 => ActionOperation::NormalMotion((Self::parse_object(&mut iter)?,)),
                 0x54 => ActionOperation::Wander((Self::parse_object(&mut iter)?,)),

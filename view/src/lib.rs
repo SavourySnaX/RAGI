@@ -52,7 +52,8 @@ impl ViewLoop {
 impl ViewResource {
     pub fn new(volume:&Volume, entry: &ResourceDirectoryEntry) -> Result<ViewResource, String> {
         let mut t=VolumeCache::new();
-        let slice = volume.fetch_data_slice(&mut t,entry)?;
+        let data_slice = volume.fetch_data_slice(&mut t,entry)?;
+        let slice = data_slice.0;
         let slice_iter = slice.iter();
 
         // Read in header (skip first 2 bytes as they are unknown)

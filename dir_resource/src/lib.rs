@@ -1,4 +1,4 @@
-use std::{ops::Index, path::Path, fs};
+use std::{ops::Index, path::Path, fs, cmp::Ordering};
 
 #[cfg(test)]
 mod tests {
@@ -56,10 +56,12 @@ mod tests {
 }
 
 
+#[derive(Eq)]
 pub struct ResourcesVersion {
     major:u8,
     minor:u16,
     patch:u16,
+    comparing:u64,
 }
 
 pub struct Root<'a> {
@@ -70,20 +72,39 @@ pub struct Root<'a> {
 impl ResourcesVersion {
     pub fn new(str:&str) -> ResourcesVersion {
         let mut parts = str.split('.');
-        if let Some(major) = parts.next() {
-            let major = major.parse::<u8>().unwrap_or_default();
-            if let Some(minor) = parts.next() {
-                let minor = minor.parse::<u16>().unwrap_or_default();
-                if let Some(patch) = parts.next() {
-                    let patch = patch.parse::<u16>().unwrap_or_default();
-
-                    return ResourcesVersion { major, minor, patch };
+        let mut major=0;
+        let mut minor=0;
+        let mut patch=0;
+        if let Some(smajor) = parts.next() {
+            major = smajor.parse::<u8>().unwrap_or_default();
+            if let Some(sminor) = parts.next() {
+                minor = sminor.parse::<u16>().unwrap_or_default();
+                if let Some(spatch) = parts.next() {
+                    patch = spatch.parse::<u16>().unwrap_or_default();
                 }
-                return ResourcesVersion { major, minor, patch:0 };
             }
-            return ResourcesVersion { major, minor:0, patch:0 };
         }
-        ResourcesVersion { major:0, minor:0, patch:0 }
+        let comparing = (major as u64)<<32;
+        let comparing = comparing + (minor as u64)<<16;
+        let comparing = comparing + (patch as u64);
+        ResourcesVersion { major, minor, patch, comparing }
+    }
+}
+
+impl PartialOrd for ResourcesVersion {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for ResourcesVersion {
+    fn cmp(&self, other:&Self) -> Ordering {
+        self.comparing.cmp(&other.comparing)
+    }
+}
+
+impl PartialEq for ResourcesVersion {
+    fn eq(&self, other:&Self) -> bool {
+        self.comparing==other.comparing
     }
 }
 
@@ -98,6 +119,10 @@ impl<'a> Root<'_> {
 
     pub fn file_exists(&self,file:&str) -> bool {
         self.base_path.join(file).exists()
+    }
+
+    pub fn version(&self) -> &ResourcesVersion {
+        &self.version
     }
 
     pub fn v3_directory_file(&self) -> Result<String,&'static str> {
@@ -204,8 +229,14 @@ impl ResourceDirectory {
 
     pub fn real_new(root:&Root,resource_type:ResourceType) -> Result<ResourceDirectory, &'static str> {
 
-        if root.file_exists("PICDIR") {
-            let bytes = root.read_data_or_default("PICDIR");    // to fix based on type
+        let directory_name = match resource_type {
+            ResourceType::Objects | ResourceType::Words => panic!("We should never request resource directory for these resource types"),
+            ResourceType::Pictures => "PICDIR",
+            ResourceType::Views => "VIEWDIR",
+            ResourceType::Logic => "LOGDIR",
+        };
+        if root.file_exists(directory_name) {
+            let bytes = root.read_data_or_default(directory_name);
             return ResourceDirectory::new(bytes);
         }
 

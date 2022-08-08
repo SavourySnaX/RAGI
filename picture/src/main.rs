@@ -30,7 +30,8 @@ fn dump_picture_resource(root:&Root,entry:&ResourceDirectoryEntry, index:usize) 
     let mut t = VolumeCache::new();
     let volume = Volume::new(bytes.into_iter()).unwrap();
 
-    let volume_iter = volume.fetch_data_slice(&mut t,entry).unwrap().iter();
+    let data_slice = volume.fetch_data_slice(&mut t,entry).unwrap();
+    let volume_iter = data_slice.0.iter();
 
     let data:Vec<u8> = volume_iter.cloned().collect();
     fs::write(format!("../{}-binary.bin",index).as_str(),data).unwrap();

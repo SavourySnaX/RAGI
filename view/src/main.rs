@@ -30,7 +30,8 @@ fn dump_view_resource(root:&Root,entry:&ResourceDirectoryEntry, index:usize) {
     let mut t = VolumeCache::new();
     let volume = Volume::new(bytes.into_iter()).unwrap();
 
-    let data = volume.fetch_data_slice(&mut t,entry).unwrap();
+    let data_slice = volume.fetch_data_slice(&mut t,entry).unwrap();
+    let data = data_slice.0;
 
     fs::write(format!("../{}-binary.bin",index).as_str(),data).unwrap();
 
@@ -49,7 +50,5 @@ fn dump_view_resource(root:&Root,entry:&ResourceDirectoryEntry, index:usize) {
             dump_png(format!("../{}-cell-{}-{}.png",index, l_index, c_index).as_str(),(c.get_width() as u32)*2,c.get_height() as u32,&rgba);
         }
     }
-
-
 
 }

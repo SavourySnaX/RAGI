@@ -21,7 +21,7 @@ impl Volume {
         Ok(Volume {data:bytes.collect()})
     }
     
-    pub fn fetch_data_slice<'a>(&'a self,cache:&'a mut VolumeCache, entry: &ResourceDirectoryEntry) -> Result<&'a [u8],&'static str> {
+    pub fn fetch_data_slice<'a>(&'a self,cache:&'a mut VolumeCache, entry: &ResourceDirectoryEntry) -> Result<(&'a [u8],ResourceCompression),&'static str> {
 
         return match entry.compression {
             ResourceCompression::None => self.fetch_data_slice_v2(entry),
@@ -29,7 +29,7 @@ impl Volume {
         };
     }
     
-    fn fetch_data_slice_v2<'a>(&'a self, entry: &ResourceDirectoryEntry) -> Result<&'a [u8],&'static str> {
+    fn fetch_data_slice_v2<'a>(&'a self, entry: &ResourceDirectoryEntry) -> Result<(&'a [u8],ResourceCompression),&'static str> {
 
         let slice = &self.data[entry.position as usize..];
         let slice = &slice[3..]; // Skip 0x1234 + Vol
@@ -38,10 +38,10 @@ impl Volume {
         let upper:usize = slice[1].into();
         let upper = upper<<8;
         let length = length+upper;
-        Ok(&slice[2..length+2])
+        Ok((&slice[2..length+2],ResourceCompression::None))
     }
 
-    fn fetch_data_slice_v3<'a>(&'a self, cache:&'a mut VolumeCache,entry: &ResourceDirectoryEntry) -> Result<&'a [u8],&'static str> {
+    fn fetch_data_slice_v3<'a>(&'a self, cache:&'a mut VolumeCache,entry: &ResourceDirectoryEntry) -> Result<(&'a [u8],ResourceCompression),&'static str> {
 
         let slice = &self.data[entry.position as usize..];
         let slice = &slice[3..]; // Skip 0x1234 + Vol (note we skip the upper bit in vol that indicates picture resource, assuming the compression kind to be enough)
@@ -56,12 +56,12 @@ impl Volume {
         let compressed_length = length+upper;
 
         if compressed_length == uncompressed_length {
-            return Ok(&slice[4..uncompressed_length+4]);
+            return Ok((&slice[4..uncompressed_length+4], ResourceCompression::None));
         }
 
         match entry.compression {
             ResourceCompression::None => Err("Should not reach here for uncompressed entry"),
-            ResourceCompression::Picture => Ok(&slice[4..compressed_length+4]),
+            ResourceCompression::Picture => Ok((&slice[4..compressed_length+4],ResourceCompression::Picture)),
             ResourceCompression::LZW => {
                 let cache_entry:usize=entry.position as usize;
                 let cache_entry = cache_entry + (entry.volume as usize)<<32;
@@ -82,7 +82,7 @@ impl Volume {
                     }
                 }
                 let v=&cache.cache[&cache_entry];
-                Ok(v.as_slice())
+                Ok((v.as_slice(), ResourceCompression::LZW))
             },
         }
     }

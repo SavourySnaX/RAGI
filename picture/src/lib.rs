@@ -17,8 +17,10 @@ pub struct PictureResource
 impl PictureResource {
     pub fn new(volume:&Volume, entry: &ResourceDirectoryEntry) -> Result<PictureResource, String> {
         let mut t = VolumeCache::new();
-        let picture_data = volume.fetch_data_slice(&mut t,entry)?.to_vec();
-        let compressed = match entry.compression {
+        let data_slice = volume.fetch_data_slice(&mut t,entry)?;
+        let picture_data = data_slice.0.to_vec();
+        let was_compressed=data_slice.1;
+        let compressed = match was_compressed {
             ResourceCompression::Picture => true,
             _ => false,
         };
