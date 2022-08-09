@@ -228,6 +228,7 @@ pub enum ActionOperation {
     NormalCycle((TypeObject,)),
     EndOfLoop((TypeObject,TypeFlag)),
     ReverseLoop((TypeObject,TypeFlag)),
+    ReverseCycle((TypeObject,)),
     CycleTime((TypeObject,TypeVar)),
     StopMotion((TypeObject,)),
     StartMotion((TypeObject,)),
@@ -318,6 +319,8 @@ pub enum ActionOperation {
     CloseWindow(()),
     MulN((TypeVar,TypeNum)),
     MulV((TypeVar,TypeVar)),
+    DivN((TypeVar,TypeNum)),
+    DivV((TypeVar,TypeVar)),
     Goto((TypeGoto,)),
     If((Vec<LogicChange>,TypeGoto)),
 }
@@ -637,6 +640,7 @@ impl LogicResource {
             ActionOperation::NormalMotion(a) |
             ActionOperation::IgnoreBlocks(a) |
             ActionOperation::AnimateObj(a) |
+            ActionOperation::ReverseCycle(a) |
             ActionOperation::ObserveBlocks(a) => Self::param_dis_object(&a.0),
             ActionOperation::Get(a) |
             ActionOperation::Drop(a) => Self::param_dis_item(&a.0, items),
@@ -654,6 +658,7 @@ impl LogicResource {
             ActionOperation::SubN(a) |
             ActionOperation::LIndirectN(a) |
             ActionOperation::MulN(a) |
+            ActionOperation::DivN(a) |
             ActionOperation::AssignN(a) => format!("{},{}",Self::param_dis_var(&a.0),Self::param_dis_num(&a.1)),
             ActionOperation::AddV(a) |
             ActionOperation::SubV(a) |
@@ -662,6 +667,7 @@ impl LogicResource {
             ActionOperation::LIndirectV(a) |
             ActionOperation::RIndirect(a) |
             ActionOperation::MulV(a) |
+            ActionOperation::DivV(a) |
             ActionOperation::AssignV(a) => format!("{},{}",Self::param_dis_var(&a.0),Self::param_dis_var(&a.1)),
             ActionOperation::Put(a) => format!("{},{}",Self::param_dis_item(&a.0,items),Self::param_dis_num(&a.1)),
             ActionOperation::SetView(a) |
@@ -1129,6 +1135,8 @@ impl LogicSequence {
                 0xFF => ActionOperation::If(Self::parse_vlogic_change_goto(&mut iter)?),
                 0xFE => ActionOperation::Goto((Self::parse_goto(&mut iter)?,)),
                 0xA9 => ActionOperation::CloseWindow(()),
+                0xA8 => ActionOperation::DivV(Self::parse_var_var(&mut iter)?),
+                0xA7 => ActionOperation::DivN(Self::parse_var_num(&mut iter)?),
                 0xA6 => ActionOperation::MulV(Self::parse_var_var(&mut iter)?),
                 0xA5 => ActionOperation::MulN(Self::parse_var_num(&mut iter)?),
                 0xA4 => ActionOperation::CloseDialog(()),
@@ -1216,6 +1224,7 @@ impl LogicSequence {
                 0x4D => ActionOperation::StopMotion((Self::parse_object(&mut iter)?,)),
                 0x4C => ActionOperation::CycleTime(Self::parse_object_var(&mut iter)?),
                 0x4B => ActionOperation::ReverseLoop(Self::parse_object_flag(&mut iter)?),
+                0x4A => ActionOperation::ReverseCycle((Self::parse_object(&mut iter)?,)),
                 0x49 => ActionOperation::EndOfLoop(Self::parse_object_flag(&mut iter)?),
                 0x48 => ActionOperation::NormalCycle((Self::parse_object(&mut iter)?,)),
                 0x47 => ActionOperation::StartCycling((Self::parse_object(&mut iter)?,)),

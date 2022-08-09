@@ -171,7 +171,7 @@ impl Sprite {
     }
     
     pub fn is_restricted_by_blocks(&self) -> bool {
-        self.observing
+        !self.ignore_barriers
     }
 
     pub fn is_restricted_to_land(&self) -> bool {
@@ -851,7 +851,7 @@ impl LogicState {
         t_indices.into_iter()
     }
     
-    pub fn active_objects_indices_sorted_y(&self) -> impl Iterator<Item = usize> {
+    pub fn active_objects_indices_sorted_pri_y(&self) -> impl Iterator<Item = usize> {
         let t_indices:Vec<usize> = (0..self.objects.len())
             .filter(|b| self.object(&type_object_from_u8(*b as u8)).is_active())
             .sorted_unstable_by(|a,b| Ord::cmp(&self.object(&type_object_from_u8(*a as u8)).get_y_fp16(),&self.object(&type_object_from_u8(*b as u8)).get_y_fp16()))
@@ -1371,7 +1371,11 @@ impl Interpretter {
             ActionOperation::ForceUpdate((o,)) => /* TODO RAGI */ println!("TODO : ForceUpdate@{} {:?}",pc,o),
             ActionOperation::ShakeScreen((num,)) => /* TODO RAGI */ println!("TODO : ShakeScreen@{} {:?}",pc,num),
             ActionOperation::PrintAtV0((m,x,y,)) => /* TODO RAGI */ { let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : PrintAtV0@{} {} {},{}",pc,m,state.get_num(x),state.get_num(y)); },
+            ActionOperation::PrintAtV1((m,x,y,w)) => /* TODO RAGI */ { let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : PrintAtV1@{} {} {},{},{}",pc,m,state.get_num(x),state.get_num(y),state.get_num(w)); },
             ActionOperation::Block((a,b,c,d)) => /* TODO RAGI */ { println!("TODO : Block@{} {},{},{},{}",pc,state.get_num(a),state.get_num(b),state.get_num(c),state.get_num(d)); },
+            ActionOperation::Unblock(()) => /* TODO RAGI */ println!("TODO : Unblock@{}",pc),
+            ActionOperation::OpenDialog(()) => /* TODO RAGI */ println!("TODO : OpenDialog@{}",pc),
+            ActionOperation::CloseDialog(()) => /* TODO RAGI */ println!("TODO : CloseDialog@{}",pc),
             
 
             // Not needed
@@ -1657,7 +1661,9 @@ impl Interpretter {
             ActionOperation::LIndirectV((var1,var2)) => {let v = &TypeVar::from(state.get_var(var1)); state.set_var(v,state.get_var(var2)); },
             ActionOperation::ReleaseLoop((obj,)) => state.mut_object(obj).set_fixed_loop(false),
             ActionOperation::UnanimateAll(()) => state.unanimate_all(),
-
+            ActionOperation::GetRoomV((item,var)) => { let item = &TypeItem::from(state.get_var(item));let loc = state.get_item_room(item); state.set_var(var,loc); }
+            ActionOperation::GetDir((obj,var)) => { let dir = state.object(obj).get_direction(); state.set_var(var,dir); },
+            ActionOperation::SetLoopV((obj,var)) => { let n=state.get_var(var); state.mut_object(obj).set_loop(n); },
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
@@ -2123,11 +2129,11 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
         if pri != 3 && obj.is_restricted_to_water() {
             blocked=true;
         }
-        if obj.priority == 0 && pri == 0 {
+        if obj.priority != 15 && pri == 0 {
             blocked=true;
         }
-        if pri == 1 {
-            if obj.priority == 15 && obj.is_restricted_by_blocks() {
+        if obj.priority != 15 && pri == 1 {
+            if obj.is_restricted_by_blocks() {
                 blocked=true;
             }
         }
@@ -2313,7 +2319,7 @@ pub fn update_anims(resources:&GameResources,state:&mut LogicState) {
 pub fn render_sprites(resources:&GameResources,state:&mut LogicState, disable_background:bool) {
     state.post_sprites = if disable_background {[0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]} else {state.back_buffer};
 
-    for num in state.active_objects_indices_sorted_y() {
+    for num in state.active_objects_indices_sorted_pri_y() {
         let obj_num = TypeObject::from(num as u8);
         let mut c = usize::from(state.object(&obj_num).get_cel());
         let cels = get_cells_clamped(resources, state.object(&obj_num));

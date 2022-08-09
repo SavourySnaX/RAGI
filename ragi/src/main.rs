@@ -102,10 +102,11 @@ impl TexturesUi {
 
 const KQ1:bool=false;
 const KQ2:bool=false;
-const KQ3:bool=true;
+const KQ3:bool=false;
 const KQ4:bool=false;
 const LL1:bool=false;
 const SQ1:bool=false;
+const SQ2:bool=true;
 const GR:bool =false;
 const BC:bool =false;
 
@@ -138,6 +139,9 @@ fn main() -> Result<(), String> {
     } else if SQ1 {
         interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/","2.089").unwrap();
         interpretter.set_breakpoint(5,54,false);
+    } else if SQ2 {
+        interpretter=Interpretter::new("../images/Space Quest II- Chapter II - Vohaul's Revenge v2.0C (1987)(Sierra On-Line, Inc.) [Adventure]/","2.917").unwrap();
+        interpretter.set_breakpoint(2,130,true);
     } else if GR {
         interpretter=Interpretter::new("../images/Gold Rush! v2.01 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.149").unwrap();
         interpretter.breakpoints.insert(LogicExecutionPosition::new(1,1), false);
