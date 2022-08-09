@@ -137,6 +137,7 @@ fn main() -> Result<(), String> {
         //interpretter.state.set_flag(&TypeFlag::from(109),true);
     } else if SQ1 {
         interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/","2.089").unwrap();
+        interpretter.set_breakpoint(5,54,false);
     } else if GR {
         interpretter=Interpretter::new("../images/Gold Rush! v2.01 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.149").unwrap();
         interpretter.breakpoints.insert(LogicExecutionPosition::new(1,1), false);
@@ -399,6 +400,8 @@ pub fn map_keycodes(code:Keycode) -> Option<AgiKeyCodes> {
         Keycode::Up => Some(AgiKeyCodes::Up),
         Keycode::Escape => Some(AgiKeyCodes::Escape),
         Keycode::Return => Some(AgiKeyCodes::Enter),
+        Keycode::Space => Some(AgiKeyCodes::Space),
+        Keycode::Backspace => Some(AgiKeyCodes::Backspace),
         Keycode::Num0 => Some(AgiKeyCodes::_0),
         Keycode::Num1 => Some(AgiKeyCodes::_1),
         Keycode::Num2 => Some(AgiKeyCodes::_2),

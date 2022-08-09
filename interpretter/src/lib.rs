@@ -739,6 +739,12 @@ impl LogicState {
         self.set_flag(&FLAG_SAID_ACCEPTED_INPUT, true);
         true
     }
+    
+    pub fn unanimate_all(&mut self) {
+        for (_,obj) in self.mut_active_objects() {
+            obj.set_active(false);
+        }
+    }
 
     pub fn mut_num_string(&mut self) -> &mut String {
         &mut self.num_string
@@ -940,6 +946,7 @@ pub enum AgiKeyCodes {
     Up = 0x4800,
     Down = 0x5000,
     Escape = 0x001B,
+    Space = 0x0020,
     Enter = 0x000D,
     Backspace = 0x0008,
     A = 0x0061,
@@ -1649,6 +1656,7 @@ impl Interpretter {
             ActionOperation::GetPriority((obj,var)) => state.set_var(var,state.object(obj).get_priority()),
             ActionOperation::LIndirectV((var1,var2)) => {let v = &TypeVar::from(state.get_var(var1)); state.set_var(v,state.get_var(var2)); },
             ActionOperation::ReleaseLoop((obj,)) => state.mut_object(obj).set_fixed_loop(false),
+            ActionOperation::UnanimateAll(()) => state.unanimate_all(),
 
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
@@ -1815,6 +1823,9 @@ impl Interpretter {
         Interpretter::interpret_instruction(resources, state, pc, &actions[pc.program_counter].action,logic_sequence)
     }
 
+    pub fn set_breakpoint(&mut self,file:usize,pc:usize,temporary:bool) {
+        self.breakpoints.insert(LogicExecutionPosition::new(file,pc), temporary);
+    }
 
 }
 
@@ -2112,11 +2123,11 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
         if pri != 3 && obj.is_restricted_to_water() {
             blocked=true;
         }
-        if pri == 0 {
+        if obj.priority == 0 && pri == 0 {
             blocked=true;
         }
         if pri == 1 {
-            if obj.is_restricted_by_blocks() {
+            if obj.priority == 15 && obj.is_restricted_by_blocks() {
                 blocked=true;
             }
         }
