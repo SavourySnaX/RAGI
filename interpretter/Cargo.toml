@@ -1,5 +1,5 @@
 [package]
-name = "logic"
+name = "interpretter"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,9 +8,13 @@ edition = "2021"
 [dependencies]
 dir_resource = {path = "../dir_resource"}
 volume = {path = "../volume"}
+logic = {path = "../logic"}
 objects = {path = "../objects"}
 words = {path = "../words"}
-duplicate = "0.4.0"
-tuple-arity = "0.1.2"
-strum = "0.24.1"
-strum_macros = "0.24.1"
+picture = {path = "../picture"}
+view = {path = "../view"}
+helpers = {path = "../helpers"}
+fixed = "1.16"
+rand = "0.8.5"
+itertools = "0.10.3"
+from-to-repr = "0.1.1"

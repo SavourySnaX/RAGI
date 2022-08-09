@@ -119,6 +119,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "from-to-repr"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68ed90ace0c69a42ac015e0e75f5f8dc3cada619cf66ca3a250850b4a9a143ce"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -215,6 +226,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "interpretter"
+version = "0.1.0"
+dependencies = [
+ "dir_resource",
+ "fixed",
+ "from-to-repr",
+ "helpers",
+ "itertools",
+ "logic",
+ "objects",
+ "picture",
+ "rand",
+ "view",
+ "volume",
+ "words",
+]
+
+[[package]]
 name = "itertools"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -269,16 +298,10 @@ version = "0.1.0"
 dependencies = [
  "dir_resource",
  "duplicate",
- "fixed",
- "helpers",
- "itertools",
  "objects",
- "picture",
- "rand",
  "strum",
  "strum_macros",
  "tuple-arity",
- "view",
  "volume",
  "words",
 ]
@@ -415,6 +438,7 @@ dependencies = [
  "imgui",
  "imgui-glow-renderer",
  "imgui-sdl2",
+ "interpretter",
  "logic",
  "objects",
  "picture",

@@ -14,6 +14,7 @@ objects = {path = "../objects"}
 picture = {path = "../picture"}
 view = {path = "../view"}
 words = {path = "../words"}
+interpretter = {path = "../interpretter"}
 sdl2 = "0.35.2"
 imgui = {version="0.8.2",features=["tables-api"] }
 imgui-sdl2 = "0.15.0"

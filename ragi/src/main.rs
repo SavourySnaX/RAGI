@@ -2,6 +2,7 @@
 use std::time::Duration;
 use glow::HasContext;
 use helpers::{conv_rgba, double_pic_width, conv_rgba_transparent};
+use interpretter::{Interpretter, LogicExecutionPosition, AgiKeyCodes, get_cells_clamped, pri_slice_for_baseline, VAR_CURRENT_ROOM};
 use logic::*;
 
 
@@ -9,7 +10,6 @@ use picture::{PIC_HEIGHT_USIZE, PIC_WIDTH_USIZE};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use imgui::*;
-use std::collections::HashMap;
 
 struct TexturesUi {
     generated_textures: Vec<TextureId>,
@@ -197,7 +197,9 @@ fn main() -> Result<(), String> {
                     break 'running;
                 },
                 Event::KeyDown { keycode: Some(code), ..} => {
-                    interpretter.key_code_pressed(code);
+                    if let Some(agi_code) = map_keycodes(code) {
+                        interpretter.key_code_pressed(agi_code);
+                    }
                 }
                 _ => {}
             }
@@ -388,224 +390,51 @@ fn main() -> Result<(), String> {
     Ok(())
 }
 
-struct Interpretter {
-    pub resources:GameResources,
-    pub state:LogicState,
-    pub stack:Vec<LogicExecutionPosition>,
-    pub keys:Vec<Keycode>,
-    pub breakpoints:HashMap<LogicExecutionPosition,bool>,
-    pub command_input_string:String,
-    pub started:u64     // 1/20 ticks since started, so seconds is divdide this by 20
-}
 
-impl Interpretter {
-    pub fn new(base_path:&'static str,version:&str) -> Result<Interpretter,String> {
-        let resources = GameResources::new(base_path,version)?;
-        let mut i = Interpretter {
-            resources,
-            state: LogicState::new(),
-            stack: Vec::new(),
-            keys: Vec::new(),
-            breakpoints: HashMap::new(),
-            command_input_string: String::new(),
-            started:0,
-        };
-        i.state.set_var(&VAR_TIME_DELAY,2);
-        i.state.initialise_rooms(&i.resources.objects.objects);
-        Ok(i)
-    }
-
-    pub fn is_paused(&self) -> bool {
-        !self.stack.is_empty() && !self.stack[self.stack.len()-1].is_input_request()
-    }
-
-    pub fn do_call(breakpoints:&mut HashMap<LogicExecutionPosition,bool>,resources:&GameResources,stack:&mut Vec<LogicExecutionPosition>,state:&mut LogicState, logics:&HashMap<usize,LogicResource>,resume:bool,single_step:bool) {
-        let mut resume = resume;
-        while !stack.is_empty() {
-            let stack_pos = stack.len()-1;
-            let entry = stack[stack_pos];
-            let logic_sequence = logics[&entry.get_logic()].get_logic_sequence();
-            let actions = logic_sequence.get_operations();
-            let mut exec = entry;
-            loop {
-                if !resume {
-                    if breakpoints.contains_key(&exec) && !single_step {
-                        if breakpoints[&exec] {
-                            breakpoints.remove(&exec);
-                        }
-                        stack[stack_pos]=exec;
-                        return;
-                    }
-                }
-                resume=false;
-                match logic_sequence.interpret_instructions(resources,state,&exec,actions) {
-                    Some(newpc) => {
-                        if newpc.is_input_request() {
-                            stack[stack_pos]=newpc;
-                            return;
-                        } else if newpc.is_call(entry.get_logic()) {
-                            stack[stack_pos]=exec.next();
-                            stack.push(newpc);
-                            if single_step {
-                                return;
-                            }
-                            break;
-                        } else {
-                            exec = newpc;
-                            if single_step {
-                                stack[stack_pos]=exec;
-                                return;
-                            }
-                        }
-                    },
-                    None => {
-                        stack.pop();
-                        if single_step {
-                            return;
-                        }
-                        if state.get_new_room()!=0 {
-                            stack.clear();  // new_room short circuits the interpretter cycle
-                        }
-                        break;
-                    },
-                }
-            }
-        }
-
-    }
-
-    pub fn call(breakpoints:&mut HashMap<LogicExecutionPosition,bool>,resources:&GameResources,stack:&mut Vec<LogicExecutionPosition>,state:&mut LogicState,logic_file:usize, logics:&HashMap<usize,LogicResource>,resume:bool,single_step:bool) {
-        if stack.is_empty() {
-            stack.push(LogicExecutionPosition::new(logic_file,0));
-        }
-        Self::do_call(breakpoints, resources, stack, state,logics,resume,single_step);
-    }
-
-    pub fn key_code_pressed(&mut self,key_code:Keycode) {
-        self.keys.push(key_code);
-    }
-    
-    pub fn clear_keys(&mut self) {
-        self.keys.clear();
-    }
-
-    pub fn run(&mut self,resume:bool,single_step:bool) {
-
-        let mut resuming = !self.stack.is_empty();
-        let mutable_state = &mut self.state;
-        let mutable_stack = &mut self.stack;
-
-        // delay (increment time by delay for now, in future, we should actually delay!)
-        self.started+=(mutable_state.get_var(&VAR_TIME_DELAY)+1) as u64;
-
-        if !resuming {
-            mutable_state.set_flag(&FLAG_COMMAND_ENTERED, false);
-            mutable_state.set_flag(&FLAG_SAID_ACCEPTED_INPUT, false);
-        }
-
-        if mutable_state.is_input_enabled() {
-            let (done,new_string) = command_input(mutable_state, self.command_input_string.clone(),20,&String::from(">"),&self.resources,0,22,15,0,false);    // not sure if attributes are affected for this
-            self.command_input_string = new_string;
-            if done && self.command_input_string.len()>0 {
-                // parse and clear input string
-                parse_input_string(mutable_state, self.command_input_string.clone(), &self.resources);
-                self.command_input_string.clear();
-            }
-        }
-        
-        // poll keyb/joystick
-        mutable_state.clear_keys();
-        for k in &self.keys {
-            if (*k as u32) <256 {
-                mutable_state.set_var(&VAR_CURRENT_KEY,*k as u8);
-                mutable_state.key_pressed(*k as u8);
-            }
-        }
-
-        if !resuming {
-            // if program.control (EGO dir = var(6))
-            // if player.control (var(6) = EGO dir)
-            if mutable_state.is_ego_player_controlled() {
-
-                // emulate walking behaviour
-                let mut d = mutable_state.get_var(&VAR_EGO_MOTION_DIR);
-                for k in &self.keys {
-                    d = match k {
-                        Keycode::Left => if d==7 { 0 } else { 7 },
-                        Keycode::Right => if d==3 { 0 } else { 3 },
-                        Keycode::Up => if d==1 { 0 } else { 1 },
-                        Keycode::Down => if d==5 { 0 } else { 5 },
-                        _ => d,
-                    }
-                }
-
-                mutable_state.set_var(&VAR_EGO_MOTION_DIR, d);
-            } else {
-                let d = mutable_state.get_var(&VAR_EGO_MOTION_DIR);
-                mutable_state.mut_object(&OBJECT_EGO).set_direction(d);
-            }
-            // For all objects wich animate.obj,start_update and draw
-            //  recaclc dir of movement
-            update_sprites(&self.resources,mutable_state);
-            update_anims(&self.resources,mutable_state);
-
-            // If score has changed(var(3)) or sound has turned off/on (flag(9)), update status line
-            //show VAR_CURRENT_SCORE out of VAR_MAXIMUM_SCORE .... SOUND ON/OFF
-
-            mutable_state.set_var(&VAR_FREE_PAGES,255);
-            let mut since_started = self.started/20;
-            let days = since_started/(60*60*24);
-            since_started%=24*60*60;
-            let hours = since_started/(60*60);
-            since_started%=60*60;
-            let minutes = since_started/(60);
-            since_started%=60;
-            let seconds = since_started;
-
-            mutable_state.set_var(&VAR_DAYS,days as u8);
-            mutable_state.set_var(&VAR_HOURS,hours as u8);
-            mutable_state.set_var(&VAR_MINUTES,minutes as u8);
-            mutable_state.set_var(&VAR_SECONDS,seconds as u8);
-        }
-        
-        loop {
-
-            if !resuming {
-                // Execute Logic 0
-                mutable_state.reset_new_room();
-            }
-            
-            Self::call(&mut self.breakpoints,&self.resources,mutable_stack,mutable_state, 0, &self.resources.logic,resume,single_step);
-            if !mutable_stack.is_empty() {
-                break;
-            } else {
-                resuming=false;
-            }
-
-            // dir of EGO <- var(6)
-            if mutable_state.is_ego_player_controlled() {
-                let d = mutable_state.get_var(&VAR_EGO_MOTION_DIR);
-                mutable_state.mut_object(&OBJECT_EGO).set_direction(d);
-            } else {
-                let d = mutable_state.object(&OBJECT_EGO).get_direction();
-                mutable_state.set_var(&VAR_EGO_MOTION_DIR, d);
-            }
-            mutable_state.set_var(&VAR_OBJ_EDGE, 0);
-            mutable_state.set_var(&VAR_OBJ_TOUCHED_BORDER, 0);
-            mutable_state.set_flag(&FLAG_ROOM_FIRST_TIME, false);
-            mutable_state.set_flag(&FLAG_RESTART_GAME, false);
-            mutable_state.set_flag(&FLAG_RESTORE_GAME, false);
-            // update all controlled objects on screen
-            // if new room issued, rerun logic
-            if mutable_state.get_new_room()!=0 {
-                LogicSequence::new_room(&self.resources,mutable_state,mutable_state.get_new_room());
-            } else {
-                break;
-            }
-        }
-
-        render_sprites(&self.resources,mutable_state,false);
-
-        mutable_state.render_final_buffer();
+pub fn map_keycodes(code:Keycode) -> Option<AgiKeyCodes> {
+    match code {
+        Keycode::Left => Some(AgiKeyCodes::Left),
+        Keycode::Right => Some(AgiKeyCodes::Right),
+        Keycode::Down => Some(AgiKeyCodes::Down),
+        Keycode::Up => Some(AgiKeyCodes::Up),
+        Keycode::Escape => Some(AgiKeyCodes::Escape),
+        Keycode::Return => Some(AgiKeyCodes::Enter),
+        Keycode::Num0 => Some(AgiKeyCodes::_0),
+        Keycode::Num1 => Some(AgiKeyCodes::_1),
+        Keycode::Num2 => Some(AgiKeyCodes::_2),
+        Keycode::Num3 => Some(AgiKeyCodes::_3),
+        Keycode::Num4 => Some(AgiKeyCodes::_4),
+        Keycode::Num5 => Some(AgiKeyCodes::_5),
+        Keycode::Num6 => Some(AgiKeyCodes::_6),
+        Keycode::Num7 => Some(AgiKeyCodes::_7),
+        Keycode::Num8 => Some(AgiKeyCodes::_8),
+        Keycode::Num9 => Some(AgiKeyCodes::_9),
+        Keycode::A => Some(AgiKeyCodes::A),
+        Keycode::B => Some(AgiKeyCodes::B),
+        Keycode::C => Some(AgiKeyCodes::C),
+        Keycode::D => Some(AgiKeyCodes::D),
+        Keycode::E => Some(AgiKeyCodes::E),
+        Keycode::F => Some(AgiKeyCodes::F),
+        Keycode::G => Some(AgiKeyCodes::G),
+        Keycode::H => Some(AgiKeyCodes::H),
+        Keycode::I => Some(AgiKeyCodes::I),
+        Keycode::J => Some(AgiKeyCodes::J),
+        Keycode::K => Some(AgiKeyCodes::K),
+        Keycode::L => Some(AgiKeyCodes::L),
+        Keycode::M => Some(AgiKeyCodes::M),
+        Keycode::N => Some(AgiKeyCodes::N),
+        Keycode::O => Some(AgiKeyCodes::O),
+        Keycode::P => Some(AgiKeyCodes::P),
+        Keycode::Q => Some(AgiKeyCodes::Q),
+        Keycode::R => Some(AgiKeyCodes::R),
+        Keycode::S => Some(AgiKeyCodes::S),
+        Keycode::T => Some(AgiKeyCodes::T),
+        Keycode::U => Some(AgiKeyCodes::U),
+        Keycode::V => Some(AgiKeyCodes::V),
+        Keycode::W => Some(AgiKeyCodes::W),
+        Keycode::X => Some(AgiKeyCodes::X),
+        Keycode::Y => Some(AgiKeyCodes::Y),
+        Keycode::Z => Some(AgiKeyCodes::Z),
+        _ => None,
     }
 }
