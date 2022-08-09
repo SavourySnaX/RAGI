@@ -102,9 +102,11 @@ impl TexturesUi {
 
 const KQ1:bool=false;
 const KQ2:bool=false;
+const KQ3:bool=false;
+const KQ4:bool=true;
 const LL1:bool=false;
 const SQ1:bool=false;
-const GR:bool =true;
+const GR:bool =false;
 const BC:bool =false;
 
 fn main() -> Result<(), String> {
@@ -121,6 +123,10 @@ fn main() -> Result<(), String> {
     } else if KQ2 {
         interpretter=Interpretter::new("../images/King's Quest II- Romancing the Throne v2.1 (1987)(Sierra On-Line, Inc.) [Adventure]/","2.411").unwrap();
 
+    } else if KQ3 {
+        interpretter=Interpretter::new("../images/King's Quest III- To Heir is Human v2.14 (1988)(Sierra On-Line, Inc.) [Adventure]/","2.936").unwrap();
+    } else if KQ4 {
+        interpretter=Interpretter::new("../images/King's Quest IV- The Perils of Rosella v2.0 (AGI Engine) (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.086").unwrap();
     } else if LL1 {
         interpretter=Interpretter::new("../images/Leisure Suit Larry in the Land of the Lounge Lizards (1987)(Sierra On-Line, Inc.) [Adventure]/","2.440").unwrap();
         //interpretter.breakpoints.insert(LogicExecutionPosition::new(2,151), false);
@@ -133,7 +139,7 @@ fn main() -> Result<(), String> {
         interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/","2.089").unwrap();
     } else if GR {
         interpretter=Interpretter::new("../images/Gold Rush! v2.01 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.149").unwrap();
-        interpretter.breakpoints.insert(LogicExecutionPosition::new(132,11), false);
+        interpretter.breakpoints.insert(LogicExecutionPosition::new(1,1), false);
     } else if BC {
         interpretter=Interpretter::new("../images/Black Cauldron, The v2.10 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.098").unwrap();
     } else {

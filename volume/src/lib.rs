@@ -55,14 +55,13 @@ impl Volume {
         let upper = upper<<8;
         let compressed_length = length+upper;
 
-        if compressed_length == uncompressed_length {
-            return Ok((&slice[4..uncompressed_length+4], ResourceCompression::None));
-        }
-
         match entry.compression {
             ResourceCompression::None => Err("Should not reach here for uncompressed entry"),
             ResourceCompression::Picture => Ok((&slice[4..compressed_length+4],ResourceCompression::Picture)),
             ResourceCompression::LZW => {
+                if compressed_length == uncompressed_length {
+                    return Ok((&slice[4..uncompressed_length+4], ResourceCompression::None));
+                }
                 let cache_entry:usize=entry.position as usize;
                 let cache_entry = cache_entry + (entry.volume as usize)<<32;
                 if !cache.cache.contains_key(&cache_entry) {

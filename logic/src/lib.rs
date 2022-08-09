@@ -281,6 +281,9 @@ impl Sprite {
 
     pub fn set_active(&mut self,b:bool) {
         self.active=b;
+        self.set_normal_motion();
+        self.set_enable_motion(true);
+        self.set_cycling(true);
     }
     
     pub fn set_frozen(&mut self,b:bool) {
@@ -749,6 +752,11 @@ impl LogicState {
     }
 
     pub fn get_random(&mut self,start:&TypeNum,end:&TypeNum) -> u8 {
+        let s=self.get_num(start);
+        let e=self.get_num(end);
+        if s==e {
+            return s;
+        }
         self.rng.gen_range(self.get_num(start)..self.get_num(end))
     }
 
@@ -1143,7 +1151,8 @@ pub enum ActionOperation {
     Get((TypeItem,)),
     GetV((TypeVar,)),
     Drop((TypeItem,)),
-    PutV ((TypeVar,TypeVar)),
+    Put((TypeItem,TypeNum)),
+    PutV((TypeVar,TypeVar)),
     GetRoomV((TypeVar,TypeVar)),
     LoadSound((TypeNum,)),
     Sound((TypeNum,TypeFlag)),
@@ -1205,6 +1214,7 @@ pub enum ActionOperation {
     SetMenuMember((TypeMessage,TypeController)),
     SubmitMenu(()),
     DisableMember((TypeController,)),
+    EnableMember((TypeController,)),
     MenuInput(()),
     CloseWindow(()),
     ShowObjV((TypeVar,)),
@@ -1532,6 +1542,7 @@ impl LogicResource {
             ActionOperation::Log(a) |
             ActionOperation::SetGameID(a) => self.param_dis_message(&a.0),
             ActionOperation::Parse(a) => Self::param_dis_string(&a.0),
+            ActionOperation::EnableMember(a) |
             ActionOperation::DisableMember(a) => Self::param_dis_controller(&a.0),
             ActionOperation::SetTextAttribute(a) => format!("{},{}",Self::param_dis_num(&a.0),Self::param_dis_num(&a.1)),
             ActionOperation::Sound(a) => format!("{},{}",Self::param_dis_num(&a.0),Self::param_dis_flag(&a.1)),
@@ -1548,6 +1559,7 @@ impl LogicResource {
             ActionOperation::RIndirect(a) |
             ActionOperation::MulV(a) |
             ActionOperation::AssignV(a) => format!("{},{}",Self::param_dis_var(&a.0),Self::param_dis_var(&a.1)),
+            ActionOperation::Put(a) => format!("{},{}",Self::param_dis_item(&a.0,items),Self::param_dis_num(&a.1)),
             ActionOperation::SetView(a) |
             ActionOperation::SetLoop(a) |
             ActionOperation::SetCel(a) |
@@ -1799,6 +1811,10 @@ impl LogicSequence {
         Ok((Self::parse_var(iter)?,Self::parse_var(iter)?))
     }
     
+    fn parse_item_num(iter:&mut std::slice::Iter<u8>) -> Result<(TypeItem,TypeNum), &'static str> {
+        Ok((Self::parse_item(iter)?,Self::parse_num(iter)?))
+    }
+    
     fn parse_item_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeItem,TypeVar), &'static str> {
         Ok((Self::parse_item(iter)?,Self::parse_var(iter)?))
     }
@@ -2014,6 +2030,7 @@ impl LogicSequence {
                 0xA2 => ActionOperation::ShowObjV((Self::parse_var(&mut iter)?,)),
                 0xA1 => ActionOperation::MenuInput(()),
                 0xA0 => ActionOperation::DisableMember((Self::parse_controller(&mut iter)?,)),
+                0x9F => ActionOperation::EnableMember((Self::parse_controller(&mut iter)?,)),
                 0x9E => ActionOperation::SubmitMenu(()),
                 0x9D => ActionOperation::SetMenuMember(Self::parse_message_controller(&mut iter)?),
                 0x9C => ActionOperation::SetMenu((Self::parse_message(&mut iter)?,)),
@@ -2071,7 +2088,8 @@ impl LogicSequence {
                 0x63 => ActionOperation::Sound(Self::parse_num_flag(&mut iter)?),
                 0x62 => ActionOperation::LoadSound((Self::parse_num(&mut iter)?,)),
                 0x61 => ActionOperation::GetRoomV(Self::parse_var_var(&mut iter)?),
-                0x60 => ActionOperation::PutV(Self::parse_var_var(&mut iter)?),
+                0x60 => ActionOperation::PutV(Self::parse_var_var(&mut iter)?), //Check not item,var
+                0x5F => ActionOperation::Put(Self::parse_item_num(&mut iter)?),
                 0x5E => ActionOperation::Drop((Self::parse_item(&mut iter)?,)),
                 0x5D => ActionOperation::GetV((Self::parse_var(&mut iter)?,)),
                 0x5C => ActionOperation::Get((Self::parse_item(&mut iter)?,)),
@@ -2370,6 +2388,7 @@ impl LogicSequence {
             ActionOperation::ForceUpdate((o,)) => /* TODO RAGI */ println!("TODO : ForceUpdate@{} {:?}",pc,o),
             ActionOperation::ShakeScreen((num,)) => /* TODO RAGI */ println!("TODO : ShakeScreen@{} {:?}",pc,num),
             ActionOperation::PrintAtV0((m,x,y,)) => /* TODO RAGI */ { let m = self.decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : PrintAtV0@{} {} {},{}",pc,m,state.get_num(x),state.get_num(y)); },
+            ActionOperation::Block((a,b,c,d)) => /* TODO RAGI */ { println!("TODO : Block@{} {},{},{},{}",pc,state.get_num(a),state.get_num(b),state.get_num(c),state.get_num(d)); },
             
 
             // Not needed
@@ -2650,6 +2669,8 @@ impl LogicSequence {
                 state.set_flag(&FLAG_LEAVE_WINDOW_OPEN, false);
             },
             ActionOperation::GetPriority((obj,var)) => state.set_var(var,state.object(obj).get_priority()),
+            ActionOperation::LIndirectV((var1,var2)) => {let v = &TypeVar::from(state.get_var(var1)); state.set_var(v,state.get_var(var2)); },
+            ActionOperation::ReleaseLoop((obj,)) => state.mut_object(obj).set_fixed_loop(false),
 
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
