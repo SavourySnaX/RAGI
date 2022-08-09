@@ -102,8 +102,8 @@ impl TexturesUi {
 
 const KQ1:bool=false;
 const KQ2:bool=false;
-const KQ3:bool=false;
-const KQ4:bool=true;
+const KQ3:bool=true;
+const KQ4:bool=false;
 const LL1:bool=false;
 const SQ1:bool=false;
 const GR:bool =false;

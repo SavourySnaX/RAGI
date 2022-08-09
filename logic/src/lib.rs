@@ -1216,8 +1216,10 @@ pub enum ActionOperation {
     DisableMember((TypeController,)),
     EnableMember((TypeController,)),
     MenuInput(()),
-    CloseWindow(()),
     ShowObjV((TypeVar,)),
+    OpenDialog(()),
+    CloseDialog(()),
+    CloseWindow(()),
     MulN((TypeVar,TypeNum)),
     MulV((TypeVar,TypeVar)),
     Goto((TypeGoto,)),
@@ -1478,6 +1480,8 @@ impl LogicResource {
             ActionOperation::SetScanStart(_) |
             ActionOperation::ResetScanStart(_) |
             ActionOperation::CloseWindow(_) |
+            ActionOperation::OpenDialog(_) |
+            ActionOperation::CloseDialog(_) |
             ActionOperation::Version(_) => String::new(),
             ActionOperation::Increment(a) |
             ActionOperation::Decrement(a) |
@@ -2027,6 +2031,8 @@ impl LogicSequence {
                 0xA9 => ActionOperation::CloseWindow(()),
                 0xA6 => ActionOperation::MulV(Self::parse_var_var(&mut iter)?),
                 0xA5 => ActionOperation::MulN(Self::parse_var_num(&mut iter)?),
+                0xA4 => ActionOperation::CloseDialog(()),
+                0xA3 => ActionOperation::OpenDialog(()),
                 0xA2 => ActionOperation::ShowObjV((Self::parse_var(&mut iter)?,)),
                 0xA1 => ActionOperation::MenuInput(()),
                 0xA0 => ActionOperation::DisableMember((Self::parse_controller(&mut iter)?,)),
