@@ -145,7 +145,7 @@ fn main() -> Result<(), String> {
         interpretter.set_breakpoint(2,130,true);
     } else if SQ2_F {
         interpretter=Interpretter::new("../images/Space Quest II V2.0F/","2.936").unwrap();
-        interpretter.breakpoints.insert(LogicExecutionPosition::new(0,0), false);
+        interpretter.breakpoints.insert(LogicExecutionPosition::new(140,145), false);
     } else if GR {
         interpretter=Interpretter::new("../images/Gold Rush! v2.01 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.149").unwrap();
         interpretter.breakpoints.insert(LogicExecutionPosition::new(1,1), false);

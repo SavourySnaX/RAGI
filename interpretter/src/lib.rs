@@ -871,13 +871,16 @@ impl LogicState {
         &mut self.video_buffer
     }
     
-    
     pub fn priority(&self) -> &[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
         &self.priority_buffer
     }
 
     pub fn back_buffer(&self) -> &[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
         &self.back_buffer
+    }
+    
+    pub fn mut_back_buffer(&mut self) -> &mut [u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
+        &mut self.back_buffer
     }
 
     pub fn text_buffer(&self) -> &[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
@@ -1366,6 +1369,31 @@ impl Interpretter {
         new_string
     }
 
+    fn handle_window_request(resources:&GameResources,state:&mut LogicState,pc:&LogicExecutionPosition,m:String) -> Option<LogicExecutionPosition> {
+        if state.displayed != m {
+            state.displayed = m.clone();
+            Self::close_windows(resources, state);
+        } 
+        if !Self::is_window_open(state) {
+            Self::display_window(resources, state, m.as_str());
+            if !state.get_flag(&FLAG_LEAVE_WINDOW_OPEN) {
+                return Some(pc.user_input());
+            }
+        } else {
+            // todo check dialog flag timer thing, for now, any key to exit
+            if !state.get_flag(&FLAG_LEAVE_WINDOW_OPEN) {
+                let key_pressed = state.key_len>0;
+                state.clear_keys();
+                if key_pressed {
+                    Self::close_windows(resources, state);
+                } else {
+                    return Some(pc.user_input());
+                }
+            }
+        }
+        Some(pc.next())
+    }
+
     fn interpret_instruction(resources:&GameResources,state:&mut LogicState,pc:&LogicExecutionPosition,action:&ActionOperation,logic_sequence:&LogicSequence) -> Option<LogicExecutionPosition> {
 
         match action {
@@ -1451,6 +1479,15 @@ impl Interpretter {
                 for y in 0usize..PIC_HEIGHT_USIZE {
                     for x in 0usize..PIC_WIDTH_USIZE*2 {
                         state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = dpic[x+y*SCREEN_WIDTH_USIZE];
+                    }
+                }
+                // Clear textbuffer on showpic
+                let start=0;
+                let end = PIC_HEIGHT_USIZE;
+                let col = 255;
+                for y in start..=end {
+                    for x in 0usize..SCREEN_WIDTH_USIZE {
+                        state.text_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
                     }
                 }
             },
@@ -1594,53 +1631,13 @@ impl Interpretter {
             ActionOperation::GetV((v,)) => { let i = TypeItem::from(state.get_var(v)); state.set_item_location(&i,255); },
             ActionOperation::Drop((i,)) => state.set_item_location(i,0),
             ActionOperation::Print((m,)) => { 
-                let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); 
-                if state.displayed != m {
-                    state.displayed = m.clone();
-                    Self::close_windows(resources, state);
-                } 
-                if !Self::is_window_open(state) {
-                    Self::display_window(resources, state, m.as_str());
-                    if !state.get_flag(&FLAG_LEAVE_WINDOW_OPEN) {
-                        return Some(pc.user_input());
-                    }
-                } else {
-                    // todo check dialog flag timer thing, for now, any key to exit
-                    if !state.get_flag(&FLAG_LEAVE_WINDOW_OPEN) {
-                        let key_pressed = state.key_len>0;
-                        state.clear_keys();
-                        if key_pressed {
-                            Self::close_windows(resources, state);
-                        } else {
-                            return Some(pc.user_input());
-                        }
-                    }
-                }
+                let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m);
+                return Interpretter::handle_window_request(resources, state, pc, m);
             },
             ActionOperation::PrintV((var,)) => { 
-                let m=&TypeMessage::from(state.get_var(var)); 
-                let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); 
-                if state.displayed != m {
-                    state.displayed = m.clone();
-                    Self::close_windows(resources, state);
-                } 
-                if !Self::is_window_open(state) {
-                    Self::display_window(resources, state, m.as_str());
-                    if !state.get_flag(&FLAG_LEAVE_WINDOW_OPEN) {
-                        return Some(pc.user_input());
-                    }
-                } else {
-                    // todo check dialog flag timer thing, for now, any key to exit
-                    if !state.get_flag(&FLAG_LEAVE_WINDOW_OPEN) {
-                        let key_pressed = state.key_len>0;
-                        state.clear_keys();
-                        if key_pressed {
-                            Self::close_windows(resources, state);
-                        } else {
-                            return Some(pc.user_input());
-                        }
-                    }
-                }
+                let m=&TypeMessage::from(state.get_var(var));
+                let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m);
+                return Interpretter::handle_window_request(resources, state, pc, m);
             },
             ActionOperation::ShowObj((num,)) => {
                 let v = state.get_num(num) as usize;
@@ -2367,10 +2364,11 @@ fn render_view_to_pic(resources: &GameResources, state:&mut LogicState, view:u8,
             if col != t {
                 let sx = xx+x;
                 let sy = yy+y-h;
-                let coord = sx+sy*PIC_WIDTH_USIZE;
+                let coord = sx*2+sy*SCREEN_WIDTH_USIZE;
                 let pri = fetch_priority_for_pixel_rendering(state,sx,sy);
                 if pri <= rpri {
-                    state.mut_picture()[coord]=col;
+                    state.mut_back_buffer()[coord]=col;
+                    state.mut_back_buffer()[coord+1]=col;
                 }
             }
         }
