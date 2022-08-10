@@ -2,7 +2,7 @@
 use std::time::Duration;
 use glow::HasContext;
 use helpers::{conv_rgba, double_pic_width, conv_rgba_transparent};
-use interpretter::{Interpretter, LogicExecutionPosition, AgiKeyCodes, get_cells_clamped, pri_slice_for_baseline, VAR_CURRENT_ROOM};
+use interpretter::{Interpretter, LogicExecutionPosition, AgiKeyCodes, get_cells_clamped, pri_slice_for_baseline, VAR_CURRENT_ROOM, SCREEN_WIDTH_USIZE, SCREEN_HEIGHT_USIZE};
 use logic::*;
 
 
@@ -103,11 +103,11 @@ impl TexturesUi {
 const KQ1:bool=false;
 const KQ2:bool=false;
 const KQ3:bool=false;
-const KQ4:bool=false;
+const KQ4:bool=true;
 const LL1:bool=false;
 const SQ1:bool=false;
 const SQ2:bool=false;
-const SQ2_F:bool=true;
+const SQ2_F:bool=false;
 const GR:bool =false;
 const BC:bool =false;
 
@@ -142,12 +142,14 @@ fn main() -> Result<(), String> {
         interpretter.set_breakpoint(5,54,false);
     } else if SQ2 {
         interpretter=Interpretter::new("../images/Space Quest II- Chapter II - Vohaul's Revenge v2.0C (1987)(Sierra On-Line, Inc.) [Adventure]/","2.917").unwrap();
-        interpretter.set_breakpoint(2,130,true);
+        interpretter.set_breakpoint(2,167,true);
+        interpretter.set_breakpoint(3,136,true);
     } else if SQ2_F {
         interpretter=Interpretter::new("../images/Space Quest II V2.0F/","2.936").unwrap();
-        interpretter.breakpoints.insert(LogicExecutionPosition::new(140,145), false);
+        //interpretter.set_breakpoint(6,126,true);
     } else if GR {
         interpretter=Interpretter::new("../images/Gold Rush! v2.01 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.149").unwrap();
+        interpretter.set_breakpoint(1,1,true);
         interpretter.breakpoints.insert(LogicExecutionPosition::new(1,1), false);
     } else if BC {
         interpretter=Interpretter::new("../images/Black Cauldron, The v2.10 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.098").unwrap();

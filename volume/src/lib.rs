@@ -46,6 +46,9 @@ impl Volume {
 
     fn fetch_data_slice_v3<'a>(&'a self, cache:&'a mut VolumeCache,entry: &ResourceDirectoryEntry) -> Result<(&'a [u8],ResourceCompression),&'static str> {
 
+        if (entry.position+7) as usize > self.data.len() {
+            return Ok((&[],ResourceCompression::None));
+        }
         let slice = &self.data[entry.position as usize..];
         let slice = &slice[3..]; // Skip 0x1234 + Vol (note we skip the upper bit in vol that indicates picture resource, assuming the compression kind to be enough)
 

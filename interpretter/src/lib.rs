@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, fmt};
+use std::{collections::HashMap, fs, fmt, cmp::Ordering};
 
 use dir_resource::{Root, ResourceDirectory, ResourceType, ResourcesVersion};
 use fixed::{FixedU16, FixedI32, types::extra::U8};
@@ -12,6 +12,9 @@ use rand::{rngs::ThreadRng, Rng};
 use view::{ViewResource, ViewLoop, ViewCel};
 use volume::Volume;
 use words::Words;
+
+pub const SCREEN_WIDTH_USIZE:usize = 320;
+pub const SCREEN_HEIGHT_USIZE:usize = 200;
 
 pub const OBJECT_EGO:TypeObject = type_object_from_u8(0);
 
@@ -851,10 +854,20 @@ impl LogicState {
         t_indices.into_iter()
     }
     
+    fn compare_pri_y(a:&Sprite,b:&Sprite) -> Ordering {
+        if a.priority<b.priority {
+            return Ordering::Less;
+        } else if a.priority>b.priority {
+            return Ordering::Greater;
+        } else {
+            Ord::cmp(&a.get_y_fp16(),&b.get_y_fp16())
+        }
+    }
+
     pub fn active_objects_indices_sorted_pri_y(&self) -> impl Iterator<Item = usize> {
         let t_indices:Vec<usize> = (0..self.objects.len())
             .filter(|b| self.object(&type_object_from_u8(*b as u8)).is_active())
-            .sorted_unstable_by(|a,b| Ord::cmp(&self.object(&type_object_from_u8(*a as u8)).get_y_fp16(),&self.object(&type_object_from_u8(*b as u8)).get_y_fp16()))
+            .sorted_unstable_by(|a,b| Self::compare_pri_y(&self.object(&type_object_from_u8(*a as u8)),&self.object(&type_object_from_u8(*b as u8))))
             .collect_vec();
         t_indices.into_iter()
     }
@@ -1369,16 +1382,14 @@ impl Interpretter {
         new_string
     }
 
-    fn handle_window_request(resources:&GameResources,state:&mut LogicState,pc:&LogicExecutionPosition,m:String) -> Option<LogicExecutionPosition> {
+    fn handle_window_request(resources:&GameResources,state:&mut LogicState,pc:&LogicExecutionPosition,m:String,x:u8,y:u8,w:u8) -> Option<LogicExecutionPosition> {
         if state.displayed != m {
             state.displayed = m.clone();
             Self::close_windows(resources, state);
         } 
         if !Self::is_window_open(state) {
-            Self::display_window(resources, state, m.as_str());
-            if !state.get_flag(&FLAG_LEAVE_WINDOW_OPEN) {
-                return Some(pc.user_input());
-            }
+            Self::display_window(resources, state, m.as_str(),x,y,w);
+            return Some(pc.user_input());
         } else {
             // todo check dialog flag timer thing, for now, any key to exit
             if !state.get_flag(&FLAG_LEAVE_WINDOW_OPEN) {
@@ -1389,6 +1400,8 @@ impl Interpretter {
                 } else {
                     return Some(pc.user_input());
                 }
+            } else {
+                println!("Leave Window Open @{}",pc);
             }
         }
         Some(pc.next())
@@ -1398,8 +1411,8 @@ impl Interpretter {
 
         match action {
             // Not complete
-            ActionOperation::Sound((_num,flag)) => /* TODO RAGI  - for now, just pretend sound finished*/ {println!("TODO : Sound@{}",pc); state.set_flag(flag,true);},
-            ActionOperation::StopSound(()) => /* TODO RAGI - for now, since we complete sounds straight away, does nothing */ {println!("TODO : StopSound@{}",pc);},
+            ActionOperation::Sound((_num,flag)) => /* TODO RAGI  - for now, just pretend sound finished*/ {/*println!("TODO : Sound@{}",pc); */state.set_flag(flag,true);},
+            ActionOperation::StopSound(()) => /* TODO RAGI - for now, since we complete sounds straight away, does nothing */ {/*println!("TODO : StopSound@{}",pc);*/},
             ActionOperation::SetGameID((m,)) => /* TODO RAGI - if needed */{let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetGameID@{} {:?}",pc,m);},
             ActionOperation::ConfigureScreen((a,b,c)) => /* TODO RAGI */ { println!("TODO : ConfigureScreen@{} {:?},{:?},{:?}",pc,a,b,c);},
             ActionOperation::SetKey((a,b,c)) => /* TODO RAGI */ { println!("TODO : SetKey@{} {:?},{:?},{:?}",pc,a,b,c);},
@@ -1412,7 +1425,6 @@ impl Interpretter {
             ActionOperation::ForceUpdate((o,)) => /* TODO RAGI */ println!("TODO : ForceUpdate@{} {:?}",pc,o),
             ActionOperation::ShakeScreen((num,)) => /* TODO RAGI */ println!("TODO : ShakeScreen@{} {:?}",pc,num),
             ActionOperation::PrintAtV0((m,x,y,)) => /* TODO RAGI */ { let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : PrintAtV0@{} {} {},{}",pc,m,state.get_num(x),state.get_num(y)); },
-            ActionOperation::PrintAtV1((m,x,y,w)) => /* TODO RAGI */ { let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : PrintAtV1@{} {} {},{},{}",pc,m,state.get_num(x),state.get_num(y),state.get_num(w)); },
             ActionOperation::Block((a,b,c,d)) => /* TODO RAGI */ { println!("TODO : Block@{} {},{},{},{}",pc,state.get_num(a),state.get_num(b),state.get_num(c),state.get_num(d)); },
             ActionOperation::Unblock(()) => /* TODO RAGI */ println!("TODO : Unblock@{}",pc),
             ActionOperation::OpenDialog(()) => /* TODO RAGI */ println!("TODO : OpenDialog@{}",pc),
@@ -1632,12 +1644,27 @@ impl Interpretter {
             ActionOperation::Drop((i,)) => state.set_item_location(i,0),
             ActionOperation::Print((m,)) => { 
                 let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m);
-                return Interpretter::handle_window_request(resources, state, pc, m);
+                return Interpretter::handle_window_request(resources, state, pc, m, 255, 255, 255);
             },
             ActionOperation::PrintV((var,)) => { 
                 let m=&TypeMessage::from(state.get_var(var));
                 let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m);
-                return Interpretter::handle_window_request(resources, state, pc, m);
+                return Interpretter::handle_window_request(resources, state, pc, m, 255, 255, 255);
+            },
+            ActionOperation::PrintAtV1((m,y,x,w)) => { 
+                let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); 
+                let x = state.get_num(x);
+                let y = state.get_num(y);
+                let w = state.get_num(w);
+                return Interpretter::handle_window_request(resources,state,pc,m,x,y,w);
+            },
+            ActionOperation::PrintAtVV1((var,y,x,w)) => { 
+                let m=&TypeMessage::from(state.get_var(var));
+                let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); 
+                let x = state.get_num(x);
+                let y = state.get_num(y);
+                let w = state.get_num(w);
+                return Interpretter::handle_window_request(resources,state,pc,m,x,y,w);
             },
             ActionOperation::ShowObj((num,)) => {
                 let v = state.get_num(num) as usize;
@@ -1648,7 +1675,7 @@ impl Interpretter {
                     Self::close_windows(resources, state);
                 } 
                 if !Self::is_window_open(state) {
-                    Self::display_window(resources, state, m.as_str());
+                    Self::display_window(resources, state, m.as_str(),255,255,255);
                     Self::display_obj(resources, state, view);
 
                     return Some(pc.user_input());
@@ -1674,6 +1701,16 @@ impl Interpretter {
             ActionOperation::GetRoomV((item,var)) => { let item = &TypeItem::from(state.get_var(item));let loc = state.get_item_room(item); state.set_var(var,loc); }
             ActionOperation::GetDir((obj,var)) => { let dir = state.object(obj).get_direction(); state.set_var(var,dir); },
             ActionOperation::SetLoopV((obj,var)) => { let n=state.get_var(var); state.mut_object(obj).set_loop(n); },
+            ActionOperation::AddToPicV((var1,var2,var3,var4,var5,var6,var7)) => /* TODO RAGI */ {
+                let view=state.get_var(var1);
+                let cloop=state.get_var(var2);
+                let cel=state.get_var(var3);
+                let x=state.get_var(var4) as usize;
+                let y=state.get_var(var5) as usize;
+                let rpri=state.get_var(var6);
+                let margin=state.get_var(var7);
+                render_view_to_pic(resources, state, view, cloop, cel, x, y, rpri, margin);
+            },
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
@@ -1774,7 +1811,7 @@ impl Interpretter {
         render_view_to_window(view_cel, state, (x0*8+8).into(), (y1*8).into());
     }
 
-    pub fn display_window(resources:&GameResources,state:&mut LogicState, message:&str) {
+    pub fn display_window(resources:&GameResources,state:&mut LogicState, message:&str,x:u8,y:u8,w:u8) {
 
         // compute window size
         let mut max_width=0;
@@ -1784,10 +1821,11 @@ impl Interpretter {
         let mut iter = 0;
         let bytes = message.as_bytes();
         let mut splits=[999usize;40];
-
+        let n = if x == 255 { 30} else { (20-x)*2 };
+        let w = if w==255 || w==0 { n as u16 } else { w as u16};
         while iter < bytes.len() {
             let c=bytes[iter];
-            if width>=30 {
+            if width>=w {
                 iter-=word_len as usize;
                 splits[(height-1) as usize]=iter;
                 height+=1;
@@ -1817,8 +1855,8 @@ impl Interpretter {
         height+=1;
         max_width+=1;
 
-        let y0 = 10 - height/2;
-        let x0 = 20 - max_width/2;
+        let y0 = if x == 255 { 10 - height/2 } else { y };
+        let x0 = if x == 255 { 20 - max_width/2 } else { x as u16 };
         let y1 = y0 + height;
         let x1 = x0 + max_width;
 
@@ -2361,9 +2399,10 @@ fn render_view_to_pic(resources: &GameResources, state:&mut LogicState, view:u8,
     for yy in 0..h {
         for xx in 0..w {
             let col = if mirror {d[(w-xx-1)+yy*w]} else {d[xx+yy*w] };
-            if col != t {
+            let sy = yy+y;
+            if col != t && h<=sy {
                 let sx = xx+x;
-                let sy = yy+y-h;
+                let sy = sy-h;
                 let coord = sx*2+sy*SCREEN_WIDTH_USIZE;
                 let pri = fetch_priority_for_pixel_rendering(state,sx,sy);
                 if pri <= rpri {

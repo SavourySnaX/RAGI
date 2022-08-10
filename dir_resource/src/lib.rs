@@ -186,7 +186,6 @@ pub struct ResourceDirectoryEntry {
 /// Represents a Directory Resource in AGI (e.g. PICDIR)
 pub struct ResourceDirectory {
     entries:Vec<ResourceDirectoryEntry>,
-    resource_type:ResourceType,
 }
 
 impl IntoIterator for ResourceDirectory {
@@ -269,7 +268,7 @@ impl ResourceDirectory {
                 return Err("Input bytes are not made up of triples (size % 3 != 0)");
             }
         }
-        Ok(ResourceDirectory{entries,resource_type:ResourceType::Pictures})
+        Ok(ResourceDirectory{entries})
     }
 
     fn new_v3(bytes: Vec<u8>,resource_type:ResourceType) -> Result<ResourceDirectory, &'static str> {
@@ -349,7 +348,7 @@ impl ResourceDirectory {
                 return Err("Input bytes are not made up of triples (size % 3 != 0)");
             }
         }
-        Ok(ResourceDirectory{entries,resource_type:ResourceType::Pictures})
+        Ok(ResourceDirectory{entries})
     }
 
     pub fn get(&self,index: usize) -> Option<&ResourceDirectoryEntry> {

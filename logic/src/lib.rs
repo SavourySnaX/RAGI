@@ -8,9 +8,6 @@ use words::Words;
 
 use strum_macros::IntoStaticStr;
 
-pub const SCREEN_WIDTH_USIZE:usize = 320;
-pub const SCREEN_HEIGHT_USIZE:usize = 200;
-
 
 pub struct LogicResource {
     logic_sequence:LogicSequence,
