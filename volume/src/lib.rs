@@ -31,6 +31,9 @@ impl Volume {
     
     fn fetch_data_slice_v2<'a>(&'a self, entry: &ResourceDirectoryEntry) -> Result<(&'a [u8],ResourceCompression),&'static str> {
 
+        if (entry.position+5) as usize > self.data.len() {
+            return Ok((&[],ResourceCompression::None));
+        }
         let slice = &self.data[entry.position as usize..];
         let slice = &slice[3..]; // Skip 0x1234 + Vol
 

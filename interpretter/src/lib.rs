@@ -1021,6 +1021,8 @@ impl Interpretter {
         };
         i.state.set_var(&VAR_TIME_DELAY,2);
         i.state.initialise_rooms(&i.resources.objects.objects);
+        Interpretter::new_room(&i.resources,&mut i.state,0);
+
         Ok(i)
     }
 
@@ -1323,12 +1325,26 @@ impl Interpretter {
         // score<- var 3
     }
 
+    fn append_expansion_to_message(state:&LogicState,resources:&GameResources,file:usize,new_string:&mut String,num:u8,n_kind:u8) {
+        new_string.push_str(match n_kind {
+            b'v' => state.get_var(&TypeVar::from(num)).to_string(),
+            b'm' => Interpretter::decode_message_from_resource(state, resources, file, &TypeMessage::from(num)),
+            b'o' => resources.objects.objects[num as usize].name.clone(),
+            b'w' => state.get_parsed_word_num(num),
+            b's' => state.get_string(&TypeString::from(num)).clone(),
+            b'g' => Interpretter::decode_message_from_resource(state, resources, 0, &TypeMessage::from(num)),
+            _ => todo!(),
+        }.as_str());
+    }
+
     fn decode_message_from_resource(state:&LogicState,resources:&GameResources,file:usize,message:&TypeMessage) -> String {
         let mut new_string=String::from("");
         let mut c_state = 0;
         let mut n_kind = b' ';
         let mut num = 0;
-        for c in resources.logic[&file].get_logic_messages().strings[state.get_message(message) as usize].bytes() {
+        let m = &resources.logic[&file].get_logic_messages().strings[state.get_message(message) as usize];
+        let b = m.bytes();
+        for c in b {
             match c_state {
                 0 => if c == b'%' { c_state=1; } else { new_string.push(c as char); },
                 1 => match c {
@@ -1337,18 +1353,15 @@ impl Interpretter {
                 },
                 2 => if c>=b'0' && c<=b'9' { num*=10; num+=c-b'0'; } else 
                 {
-                    new_string.push_str(match n_kind {
-                        b'v' => state.get_var(&TypeVar::from(num)).to_string(),
-                        b'm' => Interpretter::decode_message_from_resource(state, resources, file, &TypeMessage::from(num)),
-                        b'o' => resources.objects.objects[num as usize].name.clone(),
-                        b'w' => state.get_parsed_word_num(num),
-                        b's' => state.get_string(&TypeString::from(num)).clone(),
-                        b'g' => Interpretter::decode_message_from_resource(state, resources, 0, &TypeMessage::from(num)),
-                        _ => todo!(),
-                    }.as_str());
-                    new_string.push(c as char); c_state=0; }
+                    Self::append_expansion_to_message(state, resources, file, &mut new_string,num,n_kind);
+                    new_string.push(c as char); c_state=0;
+                }
                 _ => todo!(),
             }
+        }
+        if c_state == 2 {
+            // Deal with the case where the number is at the end of the string
+            Self::append_expansion_to_message(state, resources, file, &mut new_string,num,n_kind);
         }
         new_string
     }
@@ -1691,10 +1704,15 @@ impl Interpretter {
 
     pub fn display_text(resources:&GameResources,state:&mut LogicState,x:u8,y:u8,s:&String,ink:u8,paper:u8) {
         let mut x = (x as u16)*8;
-        let y=y*8;
+        let mut y=y*8;
         for l in s.as_bytes() {
-            Self::render_glyph(resources, state, x, y, *l,ink,paper);
-            x+=8;
+            if *l == b'\n' {
+                y+=8;
+                x=0;
+            } else {
+                Self::render_glyph(resources, state, x, y, *l,ink,paper);
+                x+=8;
+            }
         }
     }
 

@@ -402,6 +402,11 @@ impl LogicMessages {
 
         Ok(LogicMessages { strings })
     }
+
+    fn make_empty() -> LogicMessages {
+        LogicMessages { strings: Vec::new() }
+    }
+
 }
 
 impl LogicResource {
@@ -410,6 +415,13 @@ impl LogicResource {
         let mut t=VolumeCache::new();
         let data_slice = volume.fetch_data_slice(&mut t,entry).expect("Expected to be able to fetch slice from entry");
         let slice = data_slice.0;
+
+        if slice.len() < 2 {
+            let logic_messages = LogicMessages::make_empty();
+            let logic_sequence = LogicSequence::make_empty();
+            return Ok(LogicResource { logic_messages, logic_sequence });
+        }
+
         let mut slice_iter = slice.iter();
 
         let lsb_pos = slice_iter.next().unwrap();
@@ -427,6 +439,7 @@ impl LogicResource {
 
         Ok(LogicResource {logic_sequence, logic_messages})
     }
+
 
     pub fn get_logic_sequence(&self) -> &LogicSequence {
         &self.logic_sequence
@@ -1340,6 +1353,10 @@ impl LogicSequence {
         operations.shrink_to_fit();
         labels.shrink_to_fit();
         Ok(LogicSequence { operations, labels })
+    }
+
+    fn make_empty() -> LogicSequence {
+        LogicSequence { operations: Vec::new(), labels: HashMap::new() }
     }
 
     pub fn get_operations(&self) -> &Vec<LogicOperation> {

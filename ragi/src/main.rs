@@ -106,7 +106,8 @@ const KQ3:bool=false;
 const KQ4:bool=false;
 const LL1:bool=false;
 const SQ1:bool=false;
-const SQ2:bool=true;
+const SQ2:bool=false;
+const SQ2_F:bool=true;
 const GR:bool =false;
 const BC:bool =false;
 
@@ -142,6 +143,9 @@ fn main() -> Result<(), String> {
     } else if SQ2 {
         interpretter=Interpretter::new("../images/Space Quest II- Chapter II - Vohaul's Revenge v2.0C (1987)(Sierra On-Line, Inc.) [Adventure]/","2.917").unwrap();
         interpretter.set_breakpoint(2,130,true);
+    } else if SQ2_F {
+        interpretter=Interpretter::new("../images/Space Quest II V2.0F/","2.936").unwrap();
+        interpretter.breakpoints.insert(LogicExecutionPosition::new(0,0), false);
     } else if GR {
         interpretter=Interpretter::new("../images/Gold Rush! v2.01 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.149").unwrap();
         interpretter.breakpoints.insert(LogicExecutionPosition::new(1,1), false);
