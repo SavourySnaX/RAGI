@@ -100,16 +100,17 @@ impl TexturesUi {
     }
 }
 
-const KQ1:bool=false;
+const KQ1:bool=true;
 const KQ2:bool=false;
 const KQ3:bool=false;
-const KQ4:bool=true;
+const KQ4:bool=false;
 const LL1:bool=false;
 const SQ1:bool=false;
 const SQ2:bool=false;
 const SQ2_F:bool=false;
 const GR:bool =false;
 const BC:bool =false;
+const MH1:bool = false;
 
 fn main() -> Result<(), String> {
 
@@ -150,9 +151,11 @@ fn main() -> Result<(), String> {
     } else if GR {
         interpretter=Interpretter::new("../images/Gold Rush! v2.01 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.149").unwrap();
         interpretter.set_breakpoint(1,1,true);
-        interpretter.breakpoints.insert(LogicExecutionPosition::new(1,1), false);
     } else if BC {
         interpretter=Interpretter::new("../images/Black Cauldron, The v2.10 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.098").unwrap();
+    } else if MH1 {
+        interpretter=Interpretter::new("../images/Manhunter- New York v1.22 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.102").unwrap();
+        interpretter.set_breakpoint(0,0,true);
     } else {
         panic!("NO GAME SET");
     }

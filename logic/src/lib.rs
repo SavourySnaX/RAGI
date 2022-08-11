@@ -132,14 +132,14 @@ pub enum ConditionOperation {
     IsSetV((TypeVar,)),
     Has((TypeItem,)),
     ObjInRoom((TypeItem,TypeVar)),
-    PosN((TypeObject,TypeNum,TypeNum,TypeNum,TypeNum)),
+    Posn((TypeObject,TypeNum,TypeNum,TypeNum,TypeNum)),
     Controller((TypeController,)),
     HaveKey(()),
     Said((Vec<TypeWord>,)),
     CompareStrings((TypeString,TypeString)),
     ObjInBox((TypeObject,TypeNum,TypeNum,TypeNum,TypeNum)),
-    CenterPosN((TypeObject,TypeNum,TypeNum,TypeNum,TypeNum)),
-    RightPosN((TypeObject,TypeNum,TypeNum,TypeNum,TypeNum)),
+    CenterPosn((TypeObject,TypeNum,TypeNum,TypeNum,TypeNum)),
+    RightPosn((TypeObject,TypeNum,TypeNum,TypeNum,TypeNum)),
 }
 
 #[derive(IntoStaticStr,Debug)]
@@ -169,6 +169,7 @@ pub enum ActionOperation {
     Toggle((TypeFlag,)),
     SetV((TypeVar,)),
     ResetV((TypeVar,)),
+    ToggleV((TypeVar,)),
     NewRoom((TypeNum,)),
     NewRoomV((TypeVar,)),
     LoadLogic((TypeNum,)),
@@ -190,7 +191,7 @@ pub enum ActionOperation {
     Erase((TypeObject,)),
     Position((TypeObject,TypeNum,TypeNum)),
     PositionV((TypeObject,TypeVar,TypeVar)),
-    GetPosN((TypeObject,TypeVar,TypeVar)),
+    GetPosn((TypeObject,TypeVar,TypeVar)),
     Reposition((TypeObject,TypeVar,TypeVar)),
     SetView((TypeObject,TypeNum)),
     SetViewV((TypeObject,TypeVar)),
@@ -204,6 +205,7 @@ pub enum ActionOperation {
     CurrentCel((TypeObject,TypeVar)),
     CurrentLoop((TypeObject,TypeVar)),
     CurrentView((TypeObject,TypeVar)),
+    NumberOfLoops((TypeObject,TypeVar)),
     SetPriority((TypeObject,TypeNum)),
     SetPriorityV((TypeObject,TypeVar)),
     ReleasePriority((TypeObject,)),
@@ -266,6 +268,7 @@ pub enum ActionOperation {
     StatusLineOff(()),
     SetString((TypeString,TypeMessage)),
     GetString((TypeString,TypeMessage,TypeNum,TypeNum,TypeNum)),
+    WordToString((TypeWord,TypeString)),
     Parse((TypeString,)),
     GetNum((TypeMessage,TypeVar)),
     PreventInput(()),
@@ -276,6 +279,7 @@ pub enum ActionOperation {
     Status(()),
     SaveGame(()),
     RestoreGame(()),
+    InitDisk(()),
     RestartGame(()),
     ShowObj((TypeNum,)),
     Random((TypeNum,TypeNum,TypeVar)),
@@ -298,12 +302,15 @@ pub enum ActionOperation {
     ResetScanStart(()),
     RepositionTo((TypeObject,TypeNum,TypeNum)),
     RepositionToV((TypeObject,TypeVar,TypeVar)),
+    TraceOn(()),
     TraceInfo((TypeNum,TypeNum,TypeNum)),
     PrintAtV0((TypeMessage,TypeNum,TypeNum)),
     PrintAtV1((TypeMessage,TypeNum,TypeNum,TypeNum)),
     PrintAtVV0((TypeVar,TypeNum,TypeNum)),
     PrintAtVV1((TypeVar,TypeNum,TypeNum,TypeNum)),
+    DiscardViewV((TypeVar,)),
     ClearTextRect((TypeNum,TypeNum,TypeNum,TypeNum,TypeNum)),
+    SetUpperLeft((TypeNum,TypeNum)),
     SetMenu((TypeMessage,)),
     SetMenuMember((TypeMessage,TypeController)),
     SubmitMenu(()),
@@ -313,11 +320,24 @@ pub enum ActionOperation {
     ShowObjV((TypeVar,)),
     OpenDialog(()),
     CloseDialog(()),
-    CloseWindow(()),
     MulN((TypeVar,TypeNum)),
     MulV((TypeVar,TypeVar)),
     DivN((TypeVar,TypeNum)),
     DivV((TypeVar,TypeVar)),
+    CloseWindow(()),
+    SetSimple((TypeString,)),
+    PushScript(()),
+    PopScript(()),
+    HoldKey(()),
+    SetPriBase((TypeNum,)),
+    DiscardSound((TypeNum,)),
+    HideMouse(()),
+    AllowMenu((TypeNum,)),
+    ShowMouse(()),
+    FenceMouse((TypeNum,TypeNum,TypeNum,TypeNum)),
+    MousePosn((TypeVar,TypeVar)),
+    ReleaseKey(()),
+    AdjEgoMoveToXy(()),
     Goto((TypeGoto,)),
     If((Vec<LogicChange>,TypeGoto)),
 }
@@ -516,9 +536,9 @@ impl LogicResource {
 
     pub fn logic_args_disassemble(operation:&ConditionOperation,words:&Words,items:&Objects) -> String {
         return match operation {
-            ConditionOperation::RightPosN(a) |
-            ConditionOperation::CenterPosN(a) |
-            ConditionOperation::PosN(a) |
+            ConditionOperation::RightPosn(a) |
+            ConditionOperation::CenterPosn(a) |
+            ConditionOperation::Posn(a) |
             ConditionOperation::ObjInBox(a) => format!("{},{},{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3),Self::param_dis_num(&a.4)),
             ConditionOperation::CompareStrings(a) => format!("{},{}",Self::param_dis_string(&a.0),Self::param_dis_string(&a.1)),
             ConditionOperation::Said(a) => Self::param_dis_said(&a.0, words),
@@ -561,45 +581,55 @@ impl LogicResource {
         string
     }
 
-    pub fn action_args_disassemble(&self,action:&ActionOperation,_words:&Words,items:&Objects) -> String {
+    pub fn action_args_disassemble(&self,action:&ActionOperation,words:&Words,items:&Objects) -> String {
         return match action {
-            ActionOperation::Return(_) |
-            ActionOperation::ShowPic(_) |
-            ActionOperation::UnanimateAll(_) |
-            ActionOperation::Unblock(_) |
-            ActionOperation::StopSound(_) |
-            ActionOperation::TextScreen(_) |
-            ActionOperation::Graphics(_) |
-            ActionOperation::StatusLineOn(_) |
-            ActionOperation::StatusLineOff(_) |
-            ActionOperation::PreventInput(_) |
-            ActionOperation::AcceptInput(_) |
-            ActionOperation::Status(_) |
-            ActionOperation::SaveGame(_) |
-            ActionOperation::RestoreGame(_) |
-            ActionOperation::RestartGame(_) |
-            ActionOperation::ProgramControl(_) |
-            ActionOperation::PlayerControl(_) |
-            ActionOperation::QuitV0(_) |
-            ActionOperation::ShowMem(_) |
-            ActionOperation::Pause(_) |
-            ActionOperation::EchoLine(_) |
-            ActionOperation::CancelLine(_) |
-            ActionOperation::InitJoy(_) |
-            ActionOperation::ToggleMonitor(_) |
-            ActionOperation::ShowPriScreen(_) |
-            ActionOperation::SubmitMenu(_) |
-            ActionOperation::MenuInput(_) |
-            ActionOperation::SetScanStart(_) |
-            ActionOperation::ResetScanStart(_) |
-            ActionOperation::CloseWindow(_) |
-            ActionOperation::OpenDialog(_) |
-            ActionOperation::CloseDialog(_) |
-            ActionOperation::Version(_) => String::new(),
+            ActionOperation::Return(()) |
+            ActionOperation::ShowPic(()) |
+            ActionOperation::UnanimateAll(()) |
+            ActionOperation::Unblock(()) |
+            ActionOperation::StopSound(()) |
+            ActionOperation::TextScreen(()) |
+            ActionOperation::Graphics(()) |
+            ActionOperation::StatusLineOn(()) |
+            ActionOperation::StatusLineOff(()) |
+            ActionOperation::PreventInput(()) |
+            ActionOperation::AcceptInput(()) |
+            ActionOperation::Status(()) |
+            ActionOperation::SaveGame(()) |
+            ActionOperation::RestoreGame(()) |
+            ActionOperation::RestartGame(()) |
+            ActionOperation::ProgramControl(()) |
+            ActionOperation::PlayerControl(()) |
+            ActionOperation::QuitV0(()) |
+            ActionOperation::ShowMem(()) |
+            ActionOperation::Pause(()) |
+            ActionOperation::EchoLine(()) |
+            ActionOperation::CancelLine(()) |
+            ActionOperation::InitJoy(()) |
+            ActionOperation::ToggleMonitor(()) |
+            ActionOperation::ShowPriScreen(()) |
+            ActionOperation::SubmitMenu(()) |
+            ActionOperation::MenuInput(()) |
+            ActionOperation::SetScanStart(()) |
+            ActionOperation::ResetScanStart(()) |
+            ActionOperation::CloseWindow(()) |
+            ActionOperation::OpenDialog(()) |
+            ActionOperation::CloseDialog(()) |
+            ActionOperation::InitDisk(()) |
+            ActionOperation::TraceOn(()) |
+            ActionOperation::PushScript(()) |
+            ActionOperation::PopScript(()) |
+            ActionOperation::HoldKey(()) |
+            ActionOperation::ReleaseKey(()) |
+            ActionOperation::HideMouse(()) |
+            ActionOperation::ShowMouse(()) |
+            ActionOperation::AdjEgoMoveToXy(()) |
+            ActionOperation::Version(()) => String::new(),
             ActionOperation::Increment(a) |
             ActionOperation::Decrement(a) |
             ActionOperation::SetV(a) |
             ActionOperation::ResetV(a) |
+            ActionOperation::ToggleV(a) |
             ActionOperation::NewRoomV(a) |
             ActionOperation::CallV(a) |
             ActionOperation::LoadPic(a) |
@@ -611,17 +641,21 @@ impl LogicResource {
             ActionOperation::PrintV(a) |
             ActionOperation::ShowObjV(a) |
             ActionOperation::LoadLogicV(a) |
+            ActionOperation::DiscardViewV(a) |
             ActionOperation::ObjStatusV(a) => Self::param_dis_var(&a.0),
             ActionOperation::NewRoom(a) |
             ActionOperation::LoadLogic(a) |
             ActionOperation::Call(a) |
             ActionOperation::LoadView(a) |
             ActionOperation::DiscardView(a) |
+            ActionOperation::DiscardSound(a) |
             ActionOperation::SetHorizon(a) |
             ActionOperation::LoadSound(a) |
             ActionOperation::ShakeScreen(a) |
             ActionOperation::ShowObj(a) |
             ActionOperation::ScriptSize(a) |
+            ActionOperation::SetPriBase(a) |
+            ActionOperation::AllowMenu(a) |
             ActionOperation::QuitV1(a) => Self::param_dis_num(&a.0),
             ActionOperation::Set(a) |
             ActionOperation::Reset(a) |
@@ -659,9 +693,11 @@ impl LogicResource {
             ActionOperation::SetCursorChar(a) |
             ActionOperation::Log(a) |
             ActionOperation::SetGameID(a) => self.param_dis_message(&a.0),
+            ActionOperation::SetSimple(a) |
             ActionOperation::Parse(a) => Self::param_dis_string(&a.0),
             ActionOperation::EnableMember(a) |
             ActionOperation::DisableMember(a) => Self::param_dis_controller(&a.0),
+            ActionOperation::SetUpperLeft(a) |
             ActionOperation::SetTextAttribute(a) => format!("{},{}",Self::param_dis_num(&a.0),Self::param_dis_num(&a.1)),
             ActionOperation::Sound(a) => format!("{},{}",Self::param_dis_num(&a.0),Self::param_dis_flag(&a.1)),
             ActionOperation::AddN(a) |
@@ -678,6 +714,7 @@ impl LogicResource {
             ActionOperation::RIndirect(a) |
             ActionOperation::MulV(a) |
             ActionOperation::DivV(a) |
+            ActionOperation::MousePosn(a) |
             ActionOperation::AssignV(a) => format!("{},{}",Self::param_dis_var(&a.0),Self::param_dis_var(&a.1)),
             ActionOperation::Put(a) => format!("{},{}",Self::param_dis_item(&a.0,items),Self::param_dis_num(&a.1)),
             ActionOperation::SetView(a) |
@@ -697,9 +734,11 @@ impl LogicResource {
             ActionOperation::StepSize(a) |
             ActionOperation::StepTime(a) |
             ActionOperation::GetDir(a) |
+            ActionOperation::NumberOfLoops(a) |
             ActionOperation::SetDir(a) => format!("{},{}",Self::param_dis_object(&a.0),Self::param_dis_var(&a.1)),
             ActionOperation::EndOfLoop(a) |
             ActionOperation::ReverseLoop(a) => format!("{},{}",Self::param_dis_object(&a.0),Self::param_dis_flag(&a.1)),
+            ActionOperation::WordToString(a) => format!("{},{}",Self::param_dis_word(&a.0,words),Self::param_dis_string(&a.1)),
             ActionOperation::SetString(a) => format!("{},{}",Self::param_dis_string(&a.0),self.param_dis_message(&a.1)),
             ActionOperation::GetNum(a) => format!("{},{}",self.param_dis_message(&a.0),Self::param_dis_var(&a.1)),
             ActionOperation::SetMenuMember(a) => format!("{},{}",self.param_dis_message(&a.0),Self::param_dis_controller(&a.1)),
@@ -713,13 +752,14 @@ impl LogicResource {
             ActionOperation::RepositionTo(a) |
             ActionOperation::Position(a) => format!("{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2)),
             ActionOperation::PositionV(a) |
-            ActionOperation::GetPosN(a) |
+            ActionOperation::GetPosn(a) |
             ActionOperation::RepositionToV(a) |
             ActionOperation::Reposition(a) => format!("{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_var(&a.1),Self::param_dis_var(&a.2)),
             ActionOperation::Distance(a) => format!("{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_object(&a.1),Self::param_dis_var(&a.2)),
             ActionOperation::FollowEgo(a) => format!("{},{},{}",Self::param_dis_object(&a.0),Self::param_dis_num(&a.1),Self::param_dis_flag(&a.2)),
             ActionOperation::PrintAtVV0(a) => format!("{},{},{}",Self::param_dis_var(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2)),
             ActionOperation::PrintAtV0(a) => format!("{},{},{}",self.param_dis_message(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2)),
+            ActionOperation::FenceMouse(a) |
             ActionOperation::Block(a) => format!("{},{},{},{}",Self::param_dis_num(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3)),
             ActionOperation::PrintAtVV1(a) => format!("{},{},{},{}",Self::param_dis_var(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3)),
             ActionOperation::PrintAtV1(a) => format!("{},{},{},{}",self.param_dis_message(&a.0),Self::param_dis_num(&a.1),Self::param_dis_num(&a.2),Self::param_dis_num(&a.3)),
@@ -959,6 +999,10 @@ impl LogicSequence {
         Ok((Self::parse_string(iter)?,Self::parse_message(iter)?))
     }
 
+    fn parse_word_string(iter:&mut std::slice::Iter<u8>) -> Result<(TypeWord,TypeString), &'static str> {
+        Ok((Self::parse_word(iter)?,Self::parse_string(iter)?))
+    }
+
     fn parse_message_var(iter:&mut std::slice::Iter<u8>) -> Result<(TypeMessage,TypeVar), &'static str> {
         Ok((Self::parse_message(iter)?,Self::parse_var(iter)?))
     }
@@ -1053,14 +1097,14 @@ impl LogicSequence {
     
     fn parse_condition_with_code(iter:&mut std::slice::Iter<u8>, code:u8) -> Result<ConditionOperation, &'static str> {
         match code {
-            0x12 => Ok(ConditionOperation::RightPosN(Self::parse_object_num_num_num_num(iter)?)),
-            0x11 => Ok(ConditionOperation::CenterPosN(Self::parse_object_num_num_num_num(iter)?)),
+            0x12 => Ok(ConditionOperation::RightPosn(Self::parse_object_num_num_num_num(iter)?)),
+            0x11 => Ok(ConditionOperation::CenterPosn(Self::parse_object_num_num_num_num(iter)?)),
             0x10 => Ok(ConditionOperation::ObjInBox(Self::parse_object_num_num_num_num(iter)?)),
             0x0F => Ok(ConditionOperation::CompareStrings(Self::parse_string_string(iter)?)),
             0x0E => Ok(ConditionOperation::Said((Self::parse_said(iter)?,))),
             0x0D => Ok(ConditionOperation::HaveKey(())),
             0x0C => Ok(ConditionOperation::Controller((Self::parse_controller(iter)?,))),
-            0x0B => Ok(ConditionOperation::PosN(Self::parse_object_num_num_num_num(iter)?)),
+            0x0B => Ok(ConditionOperation::Posn(Self::parse_object_num_num_num_num(iter)?)),
             0x0A => Ok(ConditionOperation::ObjInRoom(Self::parse_item_var(iter)?)),
             0x09 => Ok(ConditionOperation::Has((Self::parse_item(iter)?,))),
             0x08 => Ok(ConditionOperation::IsSetV((Self::parse_var(iter)?,))),
@@ -1144,6 +1188,19 @@ impl LogicSequence {
             let action = match b {
                 0xFF => ActionOperation::If(Self::parse_vlogic_change_goto(&mut iter)?),
                 0xFE => ActionOperation::Goto((Self::parse_goto(&mut iter)?,)),
+                0xB6 => ActionOperation::AdjEgoMoveToXy(()),
+                0xB5 => ActionOperation::ReleaseKey(()),
+                0xB4 => ActionOperation::MousePosn(Self::parse_var_var(&mut iter)?),
+                0xB3 => ActionOperation::FenceMouse(Self::parse_num_num_num_num(&mut iter)?),
+                0xB2 => ActionOperation::ShowMouse(()),
+                0xB1 => ActionOperation::AllowMenu((Self::parse_num(&mut iter)?,)),
+                0xB0 => ActionOperation::HideMouse(()),
+                0xAF => ActionOperation::DiscardSound((Self::parse_num(&mut iter)?,)),
+                0xAE => ActionOperation::SetPriBase((Self::parse_num(&mut iter)?,)),
+                0xAD => ActionOperation::HoldKey(()),
+                0xAC => ActionOperation::PopScript(()),
+                0xAB => ActionOperation::PushScript(()),
+                0xAA => ActionOperation::SetSimple((Self::parse_string(&mut iter)?,)),
                 0xA9 => ActionOperation::CloseWindow(()),
                 0xA8 => ActionOperation::DivV(Self::parse_var_var(&mut iter)?),
                 0xA7 => ActionOperation::DivN(Self::parse_var_num(&mut iter)?),
@@ -1158,10 +1215,13 @@ impl LogicSequence {
                 0x9E => ActionOperation::SubmitMenu(()),
                 0x9D => ActionOperation::SetMenuMember(Self::parse_message_controller(&mut iter)?),
                 0x9C => ActionOperation::SetMenu((Self::parse_message(&mut iter)?,)),
+                0x9B => ActionOperation::SetUpperLeft(Self::parse_num_num(&mut iter)?),
                 0x9A => ActionOperation::ClearTextRect(Self::parse_num_num_num_num_num(&mut iter)?),
+                0x99 => ActionOperation::DiscardViewV((Self::parse_var(&mut iter)?,)),
                 0x98 => if version >= version_2089 && version <= version_2400 {ActionOperation::PrintAtVV0(Self::parse_var_num_num(&mut iter)?) } else {ActionOperation::PrintAtVV1(Self::parse_var_num_num_num(&mut iter)?)},
                 0x97 => if version >= version_2089 && version <= version_2400 {ActionOperation::PrintAtV0(Self::parse_message_num_num(&mut iter)?) } else {ActionOperation::PrintAtV1(Self::parse_message_num_num_num(&mut iter)?)},
                 0x96 => ActionOperation::TraceInfo(Self::parse_num_num_num(&mut iter)?),
+                0x95 => ActionOperation::TraceOn(()),
                 0x94 => ActionOperation::RepositionToV(Self::parse_object_var_var(&mut iter)?),
                 0x93 => ActionOperation::RepositionTo(Self::parse_object_num_num(&mut iter)?),
                 0x92 => ActionOperation::ResetScanStart(()),
@@ -1183,6 +1243,7 @@ impl LogicSequence {
                 0x82 => ActionOperation::Random(Self::parse_num_num_var(&mut iter)?),
                 0x81 => ActionOperation::ShowObj((Self::parse_num(&mut iter)?,)),
                 0x80 => ActionOperation::RestartGame(()),
+                0x7F => ActionOperation::InitDisk(()),
                 0x7E => ActionOperation::RestoreGame(()),
                 0x7D => ActionOperation::SaveGame(()),
                 0x7C => ActionOperation::Status(()),
@@ -1193,6 +1254,7 @@ impl LogicSequence {
                 0x77 => ActionOperation::PreventInput(()),
                 0x76 => ActionOperation::GetNum(Self::parse_message_var(&mut iter)?),
                 0x75 => ActionOperation::Parse((Self::parse_string(&mut iter)?,)),
+                0x74 => ActionOperation::WordToString(Self::parse_word_string(&mut iter)?,),
                 0x73 => ActionOperation::GetString(Self::parse_string_message_num_num_num(&mut iter)?),
                 0x72 => ActionOperation::SetString(Self::parse_string_message(&mut iter)?),
                 0x71 => ActionOperation::StatusLineOff(()),
@@ -1255,6 +1317,7 @@ impl LogicSequence {
                 0x38 => ActionOperation::ReleasePriority((Self::parse_object(&mut iter)?,)),
                 0x37 => ActionOperation::SetPriorityV(Self::parse_object_var(&mut iter)?),
                 0x36 => ActionOperation::SetPriority(Self::parse_object_num(&mut iter)?),
+                0x35 => ActionOperation::NumberOfLoops(Self::parse_object_var(&mut iter)?),
                 0x34 => ActionOperation::CurrentView(Self::parse_object_var(&mut iter)?),
                 0x33 => ActionOperation::CurrentLoop(Self::parse_object_var(&mut iter)?),
                 0x32 => ActionOperation::CurrentCel(Self::parse_object_var(&mut iter)?),
@@ -1268,7 +1331,7 @@ impl LogicSequence {
                 0x2A => ActionOperation::SetViewV(Self::parse_object_var(&mut iter)?),
                 0x29 => ActionOperation::SetView(Self::parse_object_num(&mut iter)?),
                 0x28 => ActionOperation::Reposition(Self::parse_object_var_var(&mut iter)?),
-                0x27 => ActionOperation::GetPosN(Self::parse_object_var_var(&mut iter)?),
+                0x27 => ActionOperation::GetPosn(Self::parse_object_var_var(&mut iter)?),
                 0x26 => ActionOperation::PositionV(Self::parse_object_var_var(&mut iter)?),
                 0x25 => ActionOperation::Position(Self::parse_object_num_num(&mut iter)?),
                 0x24 => ActionOperation::Erase((Self::parse_object(&mut iter)?,)),
@@ -1290,6 +1353,7 @@ impl LogicSequence {
                 0x14 => ActionOperation::LoadLogic((Self::parse_num(&mut iter)?,)),
                 0x13 => ActionOperation::NewRoomV((Self::parse_var(&mut iter)?,)),
                 0x12 => ActionOperation::NewRoom((Self::parse_num(&mut iter)?,)),
+                0x11 => ActionOperation::ToggleV((Self::parse_var(&mut iter)?,)),
                 0x10 => ActionOperation::ResetV((Self::parse_var(&mut iter)?,)),
                 0x0F => ActionOperation::SetV((Self::parse_var(&mut iter)?,)),
                 0x0E => ActionOperation::Toggle((Self::parse_flag(&mut iter)?,)),
@@ -1314,7 +1378,9 @@ impl LogicSequence {
         }
 
         let mut labels:HashMap<TypeGoto, Label>=HashMap::new();
-        labels.reserve(operations.len());
+        let operations_len = operations.len();
+        labels.reserve(operations_len);
+
         for (index,op) in operations.iter_mut().enumerate() {
             matches!(op.action, ActionOperation::Goto(_));
             let is_goto= matches!(op.action, ActionOperation::Goto(_));
@@ -1326,7 +1392,14 @@ impl LogicSequence {
                     destination = *base_offset+g;
 
                     if let std::collections::hash_map::Entry::Vacant(e) = labels.entry(destination) {
-                        e.insert(Label { is_goto_destination:is_goto, if_destination_cnt: if !is_goto {1} else {0}, operation_offset:offsets[&destination]});
+                        if let Some(operation_offset) = offsets.get(&destination) {
+                            e.insert(Label { is_goto_destination:is_goto, if_destination_cnt: if !is_goto {1} else {0}, operation_offset: *operation_offset});
+                        } else {
+                            // workaround for MH1 there is a goto jumping into the middle of an IF, for now just move it beyond the if (this will miss a 0x08 0x00 0x84 )))
+                            let patch:TypeGoto = (445 as i16).into();
+                            e.insert(Label { is_goto_destination:is_goto, if_destination_cnt: if !is_goto {1} else {0}, operation_offset:offsets[&patch]});//operation_offset:operations_len});
+                            //operations.push(LogicOperation {action:ActionOperation::SetV((0))})
+                        }
                     } else {
                         if labels[&destination].operation_offset != offsets[&destination] {
                             panic!("WUT!");

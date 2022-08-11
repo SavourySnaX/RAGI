@@ -371,6 +371,16 @@ impl Sprite {
         self.fixed_loop = b;
     }
 
+    pub fn set_normal_cycle(&mut self) {
+        self.cycle_kind=SpriteCycle::Normal;
+        self.cycle=true;
+    }
+
+    pub fn set_reverse_cycle(&mut self) {
+        self.cycle_kind=SpriteCycle::Reverse;
+        self.cycle=true;
+    }
+
     pub fn set_one_shot(&mut self,f:&TypeFlag) {
         self.cycle_kind=SpriteCycle::OneShot;
         self.cycle_flag = *f;
@@ -573,8 +583,9 @@ pub struct LogicState {
     displayed:String,
 
     //input
+    controllers:HashMap<u8,AgiKeyCodes>,
     key_len:usize,
-    key_buffer:[u8;256],
+    key_buffer:[AgiKeyCodes;256],
 
     // video
     video_buffer:[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
@@ -619,7 +630,8 @@ impl LogicState {
             ink:15,
             paper:0,
             key_len:0,
-            key_buffer:[0;256],
+            key_buffer:[AgiKeyCodes::Enter;256],
+            controllers:HashMap::new(),
             video_buffer:[15;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
             priority_buffer:[4;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
             back_buffer:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
@@ -927,11 +939,26 @@ impl LogicState {
         self.key_len=0;
     }
 
-    pub fn key_pressed(&mut self,ascii_code:u8) {
+    pub fn key_pressed(&mut self,code:&AgiKeyCodes) {
         if self.key_len<256 {
-            self.key_buffer[self.key_len]=ascii_code;
+            self.key_buffer[self.key_len]=*code;
             self.key_len+=1;
         }
+    }
+
+    pub fn is_controller_pressed(&self,key:&TypeController) -> bool {
+        if let Some(controller) = self.controllers.get(&key.get_value()) {
+            for a in 0..self.key_len {
+                if self.key_buffer[a]==*controller {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn set_controller(&mut self,c:&TypeController,keycode:&AgiKeyCodes) {
+        self.controllers.insert(c.get_value(), *keycode);
     }
 
 }
@@ -949,12 +976,11 @@ impl fmt::Debug for LogicState {
         .field("objects", &self.objects)
         .field("string", &self.string)
         .field("text_mode",&self.text_mode)
-        .field("key_buffer",&self.key_buffer)
         .finish()
     }
 }
 
-#[derive(FromToRepr,Clone, Copy)]
+#[derive(FromToRepr,Clone, Copy, PartialEq)]
 #[repr(u16)]
 pub enum AgiKeyCodes {
     Left = 0x4B00,
@@ -1145,8 +1171,8 @@ impl Interpretter {
         for k in &self.keys {
             if k.is_ascii() {
                 mutable_state.set_var(&VAR_CURRENT_KEY,k.get_ascii());
-                mutable_state.key_pressed(k.get_ascii());
             }
+            mutable_state.key_pressed(k);
         }
 
         if !resuming {
@@ -1248,8 +1274,8 @@ impl Interpretter {
             ConditionOperation::IsSetV(_) => todo!(),
             ConditionOperation::Has((item,)) => state.get_item_room(item)==255,
             ConditionOperation::ObjInRoom((item,var)) => { let n=state.get_var(var); state.get_item_room(item)==n },
-            ConditionOperation::PosN((obj,num1,num2,num3,num4)) => is_left_edge_in_box(resources,state,obj,num1,num2,num3,num4),
-            ConditionOperation::Controller(_) => /* TODO */ false,
+            ConditionOperation::Posn((obj,num1,num2,num3,num4)) => is_left_edge_in_box(resources,state,obj,num1,num2,num3,num4),
+            ConditionOperation::Controller((key,)) => state.is_controller_pressed(key),
             ConditionOperation::HaveKey(_) => {
                 // Can lock up completely as often used like so :
                 //recheck:
@@ -1265,8 +1291,8 @@ impl Interpretter {
             ConditionOperation::Said((w,)) => state.check_said(w),
             ConditionOperation::CompareStrings(_) => todo!(),
             ConditionOperation::ObjInBox((obj,num1,num2,num3,num4)) => is_left_and_right_edge_in_box(resources,state,obj,num1, num2,num3,num4),
-            ConditionOperation::CenterPosN((obj,num1,num2,num3,num4)) => is_center_edge_in_box(resources, state, obj, num1, num2, num3, num4),
-            ConditionOperation::RightPosN((obj,num1,num2,num3,num4)) => is_right_edge_in_box(resources,state,obj,num1,num2,num3,num4),
+            ConditionOperation::CenterPosn((obj,num1,num2,num3,num4)) => is_center_edge_in_box(resources, state, obj, num1, num2, num3, num4),
+            ConditionOperation::RightPosn((obj,num1,num2,num3,num4)) => is_right_edge_in_box(resources,state,obj,num1,num2,num3,num4),
         }
     }
 
@@ -1323,16 +1349,19 @@ impl Interpretter {
         state.set_var(&VAR_EGO_VIEW,state.object(&OBJECT_EGO).get_view());
         
         let c = usize::from(state.object(&OBJECT_EGO).get_cel());
-        let cels = get_cells_clamped(resources, state.object(&OBJECT_EGO));
-        let cell = &cels[c];
+        let v = usize::from(state.object(&OBJECT_EGO).get_view());
+        if resources.views.contains_key(&v) {
+            let cels = get_cells_clamped(resources, state.object(&OBJECT_EGO));
+            let cell = &cels[c];
 
-        match state.get_var(&VAR_EGO_EDGE) {
-            0 => {},
-            1 => state.mut_object(&OBJECT_EGO).set_y(PIC_HEIGHT_U8-1),
-            2 => state.mut_object(&OBJECT_EGO).set_x(0),
-            3 => state.mut_object(&OBJECT_EGO).set_y(36+cell.get_height()),
-            4 => state.mut_object(&OBJECT_EGO).set_x(PIC_WIDTH_U8-cell.get_width()),
-            _ => panic!("Invalid edge in EGO EDGE"),
+            match state.get_var(&VAR_EGO_EDGE) {
+                0 => {},
+                1 => state.mut_object(&OBJECT_EGO).set_y(PIC_HEIGHT_U8-1),
+                2 => state.mut_object(&OBJECT_EGO).set_x(0),
+                3 => state.mut_object(&OBJECT_EGO).set_y(36+cell.get_height()),
+                4 => state.mut_object(&OBJECT_EGO).set_x(PIC_WIDTH_U8-cell.get_width()),
+                _ => panic!("Invalid edge in EGO EDGE"),
+            }
         }
 
         state.set_var(&VAR_EGO_EDGE,0);
@@ -1415,7 +1444,6 @@ impl Interpretter {
             ActionOperation::StopSound(()) => /* TODO RAGI - for now, since we complete sounds straight away, does nothing */ {/*println!("TODO : StopSound@{}",pc);*/},
             ActionOperation::SetGameID((m,)) => /* TODO RAGI - if needed */{let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetGameID@{} {:?}",pc,m);},
             ActionOperation::ConfigureScreen((a,b,c)) => /* TODO RAGI */ { println!("TODO : ConfigureScreen@{} {:?},{:?},{:?}",pc,a,b,c);},
-            ActionOperation::SetKey((a,b,c)) => /* TODO RAGI */ { println!("TODO : SetKey@{} {:?},{:?},{:?}",pc,a,b,c);},
             ActionOperation::SetMenu((m,)) => /* TODO RAGI */ { let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetMenu@{} {}",pc,m); },
             ActionOperation::SetMenuMember((m,c)) => /* TODO RAGI */{ let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetMenuMember@{} {} {}",pc,m,state.get_controller(c)); },
             ActionOperation::SubmitMenu(()) => /* TODO RAGI */ { println!("TODO : SubmitMenu@{}",pc)},
@@ -1429,6 +1457,13 @@ impl Interpretter {
             ActionOperation::Unblock(()) => /* TODO RAGI */ println!("TODO : Unblock@{}",pc),
             ActionOperation::OpenDialog(()) => /* TODO RAGI */ println!("TODO : OpenDialog@{}",pc),
             ActionOperation::CloseDialog(()) => /* TODO RAGI */ println!("TODO : CloseDialog@{}",pc),
+            ActionOperation::SetPriBase((num,)) => /* TODO RAGI */ println!("TODO : SetPriBase@{} {}",pc,state.get_num(num)),
+            ActionOperation::HoldKey(()) => /* TODO RAGI */ println!("TODO : HoldKey@{}",pc),
+            ActionOperation::ReleaseKey(()) => /* TODO RAGI */ println!("TODO : ReleaseKey@{}",pc),
+            ActionOperation::PushScript(()) => /* TODO RAGI */ println!("TODO : PushScript@{}",pc),
+            ActionOperation::PopScript(()) => /* TODO RAGI */ println!("TODO : PopScript@{}",pc),
+
+
             
 
             // Not needed
@@ -1477,7 +1512,7 @@ impl Interpretter {
             ActionOperation::LIndirectN((var,num)) => {let v = &TypeVar::from(state.get_var(var)); state.set_var(v,state.get_num(num)); },
             ActionOperation::Increment((var,)) => state.set_var(var,state.get_var(var).saturating_add(1)),
             ActionOperation::Decrement((var,)) => state.set_var(var,state.get_var(var).saturating_sub(1)),
-            ActionOperation::GetPosN((obj,var1,var2)) => { state.set_var(var1, state.object(obj).get_x()); state.set_var(var2, state.object(obj).get_y()); },
+            ActionOperation::GetPosn((obj,var1,var2)) => { state.set_var(var1, state.object(obj).get_x()); state.set_var(var2, state.object(obj).get_y()); },
             ActionOperation::StopCycling((obj,)) => state.mut_object(obj).set_cycling(false),
             ActionOperation::PreventInput(()) => state.set_input(false),
             ActionOperation::SetHorizon((num,)) => state.set_horizon(state.get_num(num)),
@@ -1711,6 +1746,22 @@ impl Interpretter {
                 let margin=state.get_var(var7);
                 render_view_to_pic(resources, state, view, cloop, cel, x, y, rpri, margin);
             },
+            ActionOperation::RIndirect((var1,var2)) => {let v = &TypeVar::from(state.get_var(var2)); state.set_var(var1,state.get_var(v)); },
+            ActionOperation::NormalCycle((obj,)) => state.mut_object(obj).set_normal_cycle(),
+            ActionOperation::ReverseCycle((obj,)) => state.mut_object(obj).set_reverse_cycle(),
+            ActionOperation::SetDir((obj,var)) => { let dir = state.get_var(var); state.mut_object(obj).set_direction(dir); },
+            ActionOperation::SetKey((a,b,c)) => 
+            {
+                let code:u16 = b.get_value().into();
+                let code=code<<8;
+                let code = code | (a.get_value() as u16);
+                if let Ok(keycode) = AgiKeyCodes::try_from(code) {
+                    state.set_controller(c,&keycode);
+                } else {
+                    // Find appropriate AGIKey for 
+                    println!("Unhandled KeyCode : SetKey@{} {:?},{:?},{:?}",pc,a,b,c);
+                }
+            },
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
@@ -1821,7 +1872,7 @@ impl Interpretter {
         let mut iter = 0;
         let bytes = message.as_bytes();
         let mut splits=[999usize;40];
-        let n = if x == 255 { 30} else { (20-x)*2 };
+        let n = if x == 255 { 30 } else { 38-x };
         let w = if w==255 || w==0 { n as u16 } else { w as u16};
         while iter < bytes.len() {
             let c=bytes[iter];
@@ -1911,7 +1962,7 @@ pub fn command_input(state: &mut LogicState, s: String, max_length: usize, m: &S
     let mut new_string = s;
     let mut done = false;
     for a in 0..state.key_len {
-        let c = state.key_buffer[a];
+        let c = state.key_buffer[a].get_ascii();
         match c {
             13 => { done=true; break; },
             8 => { new_string.pop(); },

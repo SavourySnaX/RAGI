@@ -16,7 +16,8 @@ fn main() {
     //let root = Root::new("../images/Gold Rush! v2.01 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.149");
     //let root = Root::new("../images/Black Cauldron, The v2.10 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.098");
     //let root = Root::new("../images/GROZA/");
-    let root = Root::new("../images/Space Quest II V2.0F/","2.936");
+    //let root = Root::new("../images/Space Quest II V2.0F/","2.936");
+    let root = Root::new("../images/Manhunter- New York v1.22 [a1] (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.102");
 
     let bytes = root.read_data_or_default("OBJECT");
 
