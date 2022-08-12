@@ -8,7 +8,7 @@ use itertools::Itertools;
 use logic::*;
 use objects::{Objects, Object};
 use picture::*;
-use rand::{rngs::ThreadRng, Rng};
+use rand::{rngs::ThreadRng, Rng, random};
 use view::{ViewResource, ViewLoop, ViewCel};
 use volume::Volume;
 use words::Words;
@@ -96,6 +96,8 @@ pub struct Sprite {
     priority:u8,
     cycle_flag:TypeFlag,
     move_flag:TypeFlag,
+    move_step:FP16,
+    wander_distance:FP16,
     ex:FP16,
     ey:FP16,
     step_size:FP16,
@@ -137,9 +139,11 @@ impl Sprite {
             priority:0,
             cycle_flag:TypeFlag::from(0),
             move_flag: TypeFlag::from(0),
+            move_step: FP16::from_num(0),
+            wander_distance: FP16::from_num(0),
             ex: FP16::from_num(0),
             ey: FP16::from_num(0),
-            step_size: FP16::from_bits(4<<6),
+            step_size: FP16::from_num(1),
             step_time: 1,
             step_cnt: 0,
             cycle_time: 1,
@@ -270,6 +274,9 @@ impl Sprite {
     }
     
     pub fn should_cycle(&mut self) -> bool {
+        if self.cycle_time == 0 {
+            return false;
+        }
         self.cycle_cnt+=1;
         if self.cycle_cnt >= self.cycle_time 
         {
@@ -309,9 +316,11 @@ impl Sprite {
     }
 
     pub fn set_step_size(&mut self,s:u8) {
-        if s!=0 {
-            self.step_size=FP16::from_bits((s as u16)<<6);
-        }
+        self.step_size=FP16::from_num(s as u16);
+    }
+
+    pub fn restore_step_size(&mut self) {
+        self.step_size=self.move_step;
     }
 
     pub fn set_direction(&mut self,d:u8) {
@@ -357,8 +366,12 @@ impl Sprite {
         self.priority = 0;
     }
    
-    pub fn set_view(&mut self, view:u8) {
+    // Todo frozen should mean view/loop/cel is not changed if object on screen, will need a shadow of these vars to do that (or cache the cell in the sprite, and direct render that - better)
+    pub fn set_view(&mut self, view:u8, resources:&GameResources) {
         self.view = view;
+        if resources.views[&(view as usize)].get_loops().len()<=(self.cloop as usize) {
+            self.cloop=0;
+        }
     }
 
     pub fn set_loop(&mut self,n:u8) {
@@ -367,6 +380,7 @@ impl Sprite {
     
     pub fn set_cel(&mut self,n:u8) {
         self.cel = n;
+        println!("TODO - if object no longer fits, reposition along required edge");
     }
 
     pub fn set_fixed_loop(&mut self,b:bool) {
@@ -385,14 +399,16 @@ impl Sprite {
 
     pub fn set_one_shot(&mut self,f:&TypeFlag) {
         self.cycle_kind=SpriteCycle::OneShot;
+        self.set_frozen(false);
+        self.set_cycling(true);
         self.cycle_flag = *f;
-        self.cycle=true;
     }
 
     pub fn set_one_shot_reverse(&mut self,f:&TypeFlag) {
         self.cycle_kind=SpriteCycle::OneShotReverse;
+        self.set_frozen(false);
+        self.set_cycling(true);
         self.cycle_flag = *f;
-        self.cycle=true;
     }
 
     pub fn end_one_shot(&mut self) {
@@ -411,7 +427,10 @@ impl Sprite {
         self.ex=FP16::from_num(x);
         self.ey=FP16::from_num(y);
         self.move_flag= *f;
-        self.set_step_size(s)
+        self.move_step=self.get_step_size();
+        if s!=0 {
+            self.set_step_size(s);
+        }
     }
 
     pub fn set_follow(&mut self,s:u8,f:&TypeFlag) {
@@ -450,8 +469,9 @@ impl Sprite {
         self.restrict_to_water=false;
     }
 
-    pub fn set_wander(&mut self) {
+    pub fn set_wander(&mut self,dist:u8) {
         self.motion_kind=SpriteMotion::Wander;
+        self.wander_distance=FP16::from_num(dist);
         self.set_enable_motion(true);   // to confirm
     }
 
@@ -1373,9 +1393,13 @@ impl Interpretter {
             obj.set_visible(false);
             obj.set_normal_motion();
             obj.set_direction(0);
-            obj.set_cycling(true);
-            obj.set_priority_auto();
+            obj.set_cycling(false);
+            //obj.set_priority_auto();    // ??
             //obj.reset();//  (may not be needed)
+            obj.set_step_size(1);
+            obj.set_step_time(1);
+            obj.set_cycle_time(1);
+
         }
         //destroy all resources
         state.set_player_control();
@@ -1546,8 +1570,8 @@ impl Interpretter {
             ActionOperation::Reset((flag,)) => state.set_flag(flag, false),
             ActionOperation::ResetV((var,)) => { let flag=&TypeFlag::from(state.get_var(var)); state.set_flag(flag, false); },
             ActionOperation::AnimateObj((obj,)) => state.mut_object(obj).set_active(true),
-            ActionOperation::SetView((obj,num)) => {let n=state.get_num(num); state.mut_object(obj).set_view(n); },
-            ActionOperation::SetViewV((obj,var)) => {let n=state.get_var(var); state.mut_object(obj).set_view(n); },
+            ActionOperation::SetView((obj,num)) => {let n=state.get_num(num); state.mut_object(obj).set_view(n,resources); },
+            ActionOperation::SetViewV((obj,var)) => {let n=state.get_var(var); state.mut_object(obj).set_view(n,resources); },
             ActionOperation::ObserveObjs((obj,)) => state.mut_object(obj).set_observing(true),
             ActionOperation::LIndirectN((var,num)) => {let v = &TypeVar::from(state.get_var(var)); state.set_var(v,state.get_num(num)); },
             ActionOperation::Increment((var,)) => state.set_var(var,state.get_var(var).saturating_add(1)),
@@ -1556,7 +1580,7 @@ impl Interpretter {
             ActionOperation::StopCycling((obj,)) => state.mut_object(obj).set_cycling(false),
             ActionOperation::PreventInput(()) => state.set_input(false),
             ActionOperation::SetHorizon((num,)) => state.set_horizon(state.get_num(num)),
-            ActionOperation::Reposition((obj,var1,var2)) => {let dx=state.get_var(var1); let dy=state.get_var(var2); state.mut_object(obj).adjust_x_via_delta(dx); state.mut_object(obj).adjust_y_via_delta(dy); },
+            ActionOperation::Reposition((obj,var1,var2)) => {let dx=state.get_var(var1); let dy=state.get_var(var2); state.mut_object(obj).adjust_x_via_delta(dx); state.mut_object(obj).adjust_y_via_delta(dy); shuffle(state,resources,obj); },
             ActionOperation::SetPriority((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_priority(n); },
             ActionOperation::SetLoop((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_loop(n); },
             ActionOperation::SetCel((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_cel(n); },
@@ -1577,11 +1601,18 @@ impl Interpretter {
                         state.text_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
                     }
                 }
+                state.set_flag(&FLAG_LEAVE_WINDOW_OPEN, false); // Aparantly original interpretter did this
             },
             ActionOperation::ClearLines((num1,num2,num3)) => {
                 let start=usize::from(state.get_num(num1) * 8);
                 let end = usize::from(state.get_num(num2) * 8)+7;
-                let col = state.get_num(num3);
+                let input_col = state.get_num(num3);
+                let col;
+                if state.text_mode {
+                    col=0;
+                } else {
+                    col = if input_col==0 { 0 } else { 15 };
+                }
                 for y in start..=end {
                     for x in 0usize..SCREEN_WIDTH_USIZE {
                         state.text_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
@@ -1589,7 +1620,7 @@ impl Interpretter {
                 }
             },
             ActionOperation::SetString((s,m)) => { let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); state.set_string(s,m.as_str()); },
-            ActionOperation::Draw((obj,)) => state.mut_object(obj).set_visible(true),
+            ActionOperation::Draw((obj,)) => if !state.object(obj).get_visible() { shuffle(state,resources,obj); state.mut_object(obj).set_visible(true); },
             ActionOperation::EndOfLoop((obj,flag)) => { state.set_flag(flag,false); state.mut_object(obj).set_one_shot(flag); },
             ActionOperation::MoveObj((obj,num1,num2,num3,flag)) => { 
                 let x=state.get_num(num1); let y=state.get_num(num2); let s=state.get_num(num3); 
@@ -1661,7 +1692,13 @@ impl Interpretter {
             ActionOperation::StartCycling((obj,)) => state.mut_object(obj).set_cycling(true),
             ActionOperation::ObjectOnWater((obj,)) => state.mut_object(obj).set_restrict_to_water(),
             ActionOperation::ObjectOnLand((obj,)) => state.mut_object(obj).set_restrict_to_land(),
-            ActionOperation::Wander((obj,)) => state.mut_object(obj).set_wander(),
+            ActionOperation::Wander((obj,)) => {
+                let dist=state.rng.gen_range(6u8..=50u8);
+                state.mut_object(obj).set_wander(dist);
+                if *obj==OBJECT_EGO {
+                    state.set_program_control()
+                }
+            }
             ActionOperation::StartUpdate((obj,)) => state.mut_object(obj).set_frozen(false),
             ActionOperation::Distance((obj1,obj2,var)) => state.set_var(var,state.object(obj1).distance(state.object(obj2))),
             ActionOperation::ReleasePriority((obj,)) => { state.mut_object(obj).set_priority_auto(); },
@@ -1682,11 +1719,11 @@ impl Interpretter {
                     state.set_program_control();
                 }
             },
-            // TODO investigate, Position and RepositionTo act the same, should they
-            ActionOperation::Position((obj,num1,num2)) => { let x=state.get_num(num1); let y=state.get_num(num2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
-            ActionOperation::RepositionTo((obj,num1,num2)) => { let x=state.get_num(num1); let y=state.get_num(num2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
-            ActionOperation::RepositionToV((obj,var1,var2)) => {let x=state.get_var(var1); let y=state.get_var(var2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
-            ActionOperation::PositionV((obj,var1,var2)) => { let x=state.get_var(var1); let y=state.get_var(var2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
+            // TODO investigate, Position and RepositionTo act the same, should they (technically reposition clears old object first, but sprites in ragi don't work that way)
+            ActionOperation::Position((obj,num1,num2)) => { let x=state.get_num(num1); let y=state.get_num(num2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); shuffle(state,resources,obj); },
+            ActionOperation::RepositionTo((obj,num1,num2)) => { let x=state.get_num(num1); let y=state.get_num(num2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y);  shuffle(state,resources,obj); },
+            ActionOperation::RepositionToV((obj,var1,var2)) => {let x=state.get_var(var1); let y=state.get_var(var2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y);  shuffle(state,resources,obj); },
+            ActionOperation::PositionV((obj,var1,var2)) => { let x=state.get_var(var1); let y=state.get_var(var2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y);  shuffle(state,resources,obj); },
             ActionOperation::SetTextAttribute((num1,num2)) => { let ink=state.get_num(num1); let paper=state.get_num(num2); state.set_ink(ink); state.set_paper(paper); }
             ActionOperation::StatusLineOff(()) => state.set_status_visible(false),
             ActionOperation::StepTime((obj,var)) => { let time=state.get_var(var); state.mut_object(obj).set_step_time(time); },
@@ -1767,7 +1804,6 @@ impl Interpretter {
             },
             ActionOperation::CloseWindow(()) => {
                 Self::close_windows(resources, state);
-                //state.set_flag(&FLAG_LEAVE_WINDOW_OPEN, false);
             },
             ActionOperation::GetPriority((obj,var)) => state.set_var(var,state.object(obj).get_priority()),
             ActionOperation::LIndirectV((var1,var2)) => {let v = &TypeVar::from(state.get_var(var1)); state.set_var(v,state.get_var(var2)); },
@@ -2129,7 +2165,16 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
             SpriteMotion::Wander => {   // update direction randomly, if didn't move last time
                 if !state.object(obj_num).has_moved() {
                     let direction = state.rng.gen_range(0u8..=8);
+                    let distance = state.rng.gen_range(6u8..=50u8);
                     state.mut_object(obj_num).set_direction(direction);
+                    state.mut_object(obj_num).wander_distance=FP16::from_num(distance);
+                } else {
+                    let s = state.object(obj_num).get_step_size();
+                    let t = state.object(obj_num).wander_distance.saturating_sub(s);
+                    state.mut_object(obj_num).wander_distance=t;
+                    if (state.object(obj_num)).wander_distance==FP16::from_num(0) {
+                        state.mut_object(obj_num).set_direction(0);
+                    }
                 }
             },
             SpriteMotion::MoveObj => {
@@ -2137,14 +2182,25 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
                 let y=FP32::from(state.object(obj_num).get_y_fp16());
                 let ex=FP32::from(state.object(obj_num).get_end_x());
                 let ey=FP32::from(state.object(obj_num).get_end_y());
-                let dx = (ex.int()-x.int()).signum();
-                let dy = (ey.int()-y.int()).signum();
-                let direction = get_direction_from_delta(dx.to_num(), dy.to_num());
+                let dx=ex.int()-x.int();
+                let dy=ey.int()-y.int();
+                let s = FP32::from(state.object(obj_num).get_step_size());
+                let direction = if dx.abs() <= s && dy.abs() <= s {
+                    0
+                } else {
+                    let sx = dx.signum();
+                    let sy = dy.signum();
+                    get_direction_from_delta(sx.to_num(), sy.to_num())
+                };
                 state.mut_object(obj_num).set_direction(direction);
                 if direction==0 || !state.object(obj_num).has_moved() {
                     let mflag = state.object(obj_num).move_flag;
                     state.set_flag(&mflag, true);
                     state.mut_object(obj_num).clear_move();
+                    state.mut_object(obj_num).restore_step_size();
+                    if obj_num.get_value()==OBJECT_EGO.get_value() {
+                        state.set_player_control();
+                    }
                 }
             },
             SpriteMotion::FollowEgo => {
@@ -2152,9 +2208,16 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
                 let y=FP32::from(state.object(obj_num).get_y_fp16());
                 let ex=FP32::from(state.object(&OBJECT_EGO).get_x_fp16());
                 let ey=FP32::from(state.object(&OBJECT_EGO).get_y_fp16());
-                let dx = (ex.int()-x.int()).signum();
-                let dy = (ey.int()-y.int()).signum();
-                let direction = get_direction_from_delta(dx.to_num(), dy.to_num());
+                let dx=ex.int()-x.int();
+                let dy=ey.int()-y.int();
+                let s = FP32::from(state.object(obj_num).get_step_size());
+                let direction = if dx.abs() <= s || dy.abs() <= s {
+                    0
+                } else {
+                    let sx = dx.signum();
+                    let sy = dy.signum();
+                    get_direction_from_delta(sx.to_num(), sy.to_num())
+                };
                 state.mut_object(obj_num).set_direction(direction);
                 if direction==0 {
                     let mflag = state.object(obj_num).move_flag;
@@ -2488,6 +2551,13 @@ fn render_view_to_pic(resources: &GameResources, state:&mut LogicState, view:u8,
     let mirror=cel.is_mirror(cloop);
     let w = cel.get_width().into();
     let h = cel.get_height().into();
+
+    shuffle_with_vars(state,resources);
+
+    if rpri == 0 {
+        println!("render_view_to_pic - need to fetch priority for 0");
+    }
+
     for yy in 0..h {
         for xx in 0..w {
             let col = if mirror {d[(w-xx-1)+yy*w]} else {d[xx+yy*w] };
@@ -2508,6 +2578,7 @@ fn render_view_to_pic(resources: &GameResources, state:&mut LogicState, view:u8,
     }
     // render control value
     if margin<4 {
+        println!("TODO : RENDER BOX, NOT just baseline for MARGIN");
         for xx in 0..w {
             let sx = xx+x;
             let sy = y;
@@ -2564,4 +2635,12 @@ fn render_sprite(obj_num:&TypeObject, cell: &view::ViewCel, state: &mut LogicSta
             }
         }
     }
+}
+
+fn shuffle_with_vars(state:&mut LogicState,resources:&GameResources) {
+    println!("TO IMPLEMENT - SHUFFLE");
+}
+
+fn shuffle(state:&mut LogicState,resources:&GameResources,obj:&TypeObject) {
+    shuffle_with_vars(state, resources);    // TODO expand object into needed vars
 }
