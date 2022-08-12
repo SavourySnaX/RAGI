@@ -8,7 +8,7 @@ use logic::*;
 
 use picture::{PIC_HEIGHT_USIZE, PIC_WIDTH_USIZE};
 use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
+use sdl2::keyboard::{Keycode, Scancode};
 use imgui::*;
 
 struct TexturesUi {
@@ -100,7 +100,9 @@ impl TexturesUi {
     }
 }
 
-const KQ1:bool=true;
+const XMAS:bool=true;
+const DP1:bool=false;
+const KQ1:bool=false;
 const KQ2:bool=false;
 const KQ3:bool=false;
 const KQ4:bool=false;
@@ -116,7 +118,12 @@ fn main() -> Result<(), String> {
 
     let mut interpretter:Interpretter;
 
-    if KQ1 {
+    if XMAS {
+        interpretter=Interpretter::new("../images/AGI-XMAS/","2.272").unwrap();
+        interpretter.set_breakpoint(2,1,true);
+    } else if DP1 {
+        interpretter=Interpretter::new("../images/agi_demo_pack_1/","2.915").unwrap();
+    } else if KQ1 {
         //interpretter=Interpretter::new("../images/King's Quest v2.0F (AGI 2.425) (1987)(Sierra On-Line, Inc.) [Adventure]/","2.425").unwrap();
         interpretter=Interpretter::new("../images/King's Quest v1.0U (1986)(Sierra On-Line, Inc.) [Adventure][!]/","2.272").unwrap();
         //interpretter.breakpoints.insert(LogicExecutionPosition::new(53,145), false);
@@ -210,8 +217,8 @@ fn main() -> Result<(), String> {
                 Event::KeyDown { keycode: Some(Keycode::F12), .. } => {
                     break 'running;
                 },
-                Event::KeyDown { keycode: Some(code), ..} => {
-                    if let Some(agi_code) = map_keycodes(code) {
+                Event::KeyDown { keycode: Some(code), scancode: Some(scode), ..} => {
+                    if let Some(agi_code) = map_keycodes(code,scode) {
                         interpretter.key_code_pressed(agi_code);
                     }
                 }
@@ -405,7 +412,7 @@ fn main() -> Result<(), String> {
 }
 
 
-pub fn map_keycodes(code:Keycode) -> Option<AgiKeyCodes> {
+pub fn map_keycodes(code:Keycode,_scode:Scancode) -> Option<AgiKeyCodes> {
     match code {
         Keycode::Left => Some(AgiKeyCodes::Left),
         Keycode::Right => Some(AgiKeyCodes::Right),
@@ -415,6 +422,7 @@ pub fn map_keycodes(code:Keycode) -> Option<AgiKeyCodes> {
         Keycode::Return => Some(AgiKeyCodes::Enter),
         Keycode::Space => Some(AgiKeyCodes::Space),
         Keycode::Backspace => Some(AgiKeyCodes::Backspace),
+        Keycode::Tab => Some(AgiKeyCodes::Tab),
         Keycode::Num0 => Some(AgiKeyCodes::_0),
         Keycode::Num1 => Some(AgiKeyCodes::_1),
         Keycode::Num2 => Some(AgiKeyCodes::_2),
@@ -451,6 +459,16 @@ pub fn map_keycodes(code:Keycode) -> Option<AgiKeyCodes> {
         Keycode::X => Some(AgiKeyCodes::X),
         Keycode::Y => Some(AgiKeyCodes::Y),
         Keycode::Z => Some(AgiKeyCodes::Z),
-        _ => None,
+        Keycode::F1 => Some(AgiKeyCodes::F1),
+        Keycode::F2 => Some(AgiKeyCodes::F2),
+        Keycode::F3 => Some(AgiKeyCodes::F3),
+        Keycode::F4 => Some(AgiKeyCodes::F4),
+        Keycode::F5 => Some(AgiKeyCodes::F5),
+        Keycode::F6 => Some(AgiKeyCodes::F6),
+        Keycode::F7 => Some(AgiKeyCodes::F7),
+        Keycode::F8 => Some(AgiKeyCodes::F8),
+        Keycode::F9 => Some(AgiKeyCodes::F9),
+        Keycode::F10 => Some(AgiKeyCodes::F10),
+        _ => {/* println!("Unmapped Keycode {} : {}",code as i32,scode as i32);*/ None},
     }
 }

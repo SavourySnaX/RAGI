@@ -38,6 +38,8 @@ pub const VAR_EGO_VIEW:TypeVar = type_var_from_u8(16);
 
 pub const VAR_CURRENT_KEY:TypeVar = type_var_from_u8(19);
 
+pub const VAR_MESSAGE_WINDOW_TIMER:TypeVar = type_var_from_u8(21);
+
 pub const FLAG_EGO_IN_WATER:TypeFlag = type_flag_from_u8(0);
 
 pub const FLAG_COMMAND_ENTERED:TypeFlag = type_flag_from_u8(2);
@@ -588,7 +590,7 @@ pub struct LogicState {
     key_buffer:[AgiKeyCodes;256],
 
     // video
-    video_buffer:[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
+    picture_buffer:[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
     priority_buffer:[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
 
     back_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
@@ -632,7 +634,7 @@ impl LogicState {
             key_len:0,
             key_buffer:[AgiKeyCodes::Enter;256],
             controllers:HashMap::new(),
-            video_buffer:[15;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
+            picture_buffer:[15;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
             priority_buffer:[4;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
             back_buffer:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
             post_sprites:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
@@ -866,10 +868,12 @@ impl LogicState {
         t_indices.into_iter()
     }
     
-    fn compare_pri_y(a:&Sprite,b:&Sprite) -> Ordering {
-        if a.priority<b.priority {
+    fn compare_pri_y(&self,a:&Sprite,b:&Sprite) -> Ordering {
+        let ap = a.get_priority();
+        let bp = b.get_priority();
+        if ap<bp {
             return Ordering::Less;
-        } else if a.priority>b.priority {
+        } else if ap>bp {
             return Ordering::Greater;
         } else {
             Ord::cmp(&a.get_y_fp16(),&b.get_y_fp16())
@@ -879,7 +883,7 @@ impl LogicState {
     pub fn active_objects_indices_sorted_pri_y(&self) -> impl Iterator<Item = usize> {
         let t_indices:Vec<usize> = (0..self.objects.len())
             .filter(|b| self.object(&type_object_from_u8(*b as u8)).is_active())
-            .sorted_unstable_by(|a,b| Self::compare_pri_y(&self.object(&type_object_from_u8(*a as u8)),&self.object(&type_object_from_u8(*b as u8))))
+            .sorted_unstable_by(|a,b| self.compare_pri_y(&self.object(&type_object_from_u8(*a as u8)),&self.object(&type_object_from_u8(*b as u8))))
             .collect_vec();
         t_indices.into_iter()
     }
@@ -889,11 +893,11 @@ impl LogicState {
     }
 
     pub fn picture(&self) -> &[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
-        &self.video_buffer
+        &self.picture_buffer
     }
     
     pub fn mut_picture(&mut self) -> &mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
-        &mut self.video_buffer
+        &mut self.picture_buffer
     }
     
     pub fn priority(&self) -> &[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
@@ -939,11 +943,36 @@ impl LogicState {
         self.key_len=0;
     }
 
+    pub fn clear_key(&mut self,key:&TypeController) {
+        if let Some(controller) = self.controllers.get(&key.get_value()) {
+            let mut new_keys = [AgiKeyCodes::Enter;256];
+            let mut new_cnt:usize=0;
+            for a in 0..self.key_len {
+                if self.key_buffer[a]!=*controller {
+                    new_keys[new_cnt]=self.key_buffer[a];
+                    new_cnt+=1;
+                }
+            }
+            self.key_buffer=new_keys;
+            self.key_len=new_cnt;
+        }
+
+    }
+
     pub fn key_pressed(&mut self,code:&AgiKeyCodes) {
         if self.key_len<256 {
             self.key_buffer[self.key_len]=*code;
             self.key_len+=1;
         }
+    }
+
+    pub fn is_key_pressed(&self,code:&AgiKeyCodes) -> bool {
+        for a in 0..self.key_len {
+            if self.key_buffer[a]==*code {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn is_controller_pressed(&self,key:&TypeController) -> bool {
@@ -990,43 +1019,54 @@ pub enum AgiKeyCodes {
     Escape = 0x001B,
     Space = 0x0020,
     Enter = 0x000D,
+    Tab = 0x0009,
     Backspace = 0x0008,
-    A = 0x0061,
-    B = 0x0062,
-    C = 0x0063,
-    D = 0x0064,
-    E = 0x0065,
-    F = 0x0066,
-    G = 0x0067,
-    H = 0x0068,
-    I = 0x0069,
-    J = 0x006A,
-    K = 0x006B,
-    L = 0x006C,
-    M = 0x006D,
-    N = 0x006E,
-    O = 0x006F,
-    P = 0x0070,
-    Q = 0x0071,
-    R = 0x0072,
-    S = 0x0073,
-    T = 0x0074,
-    U = 0x0075,
-    V = 0x0076,
-    W = 0x0077,
-    X = 0x0078,
-    Y = 0x0079,
-    Z = 0x007A,
-    _0= 0x0030,
-    _1= 0x0031,
-    _2= 0x0032,
-    _3= 0x0033,
-    _4= 0x0034,
-    _5= 0x0035,
-    _6= 0x0036,
-    _7= 0x0037,
-    _8= 0x0038,
-    _9= 0x0039,
+    A  = 0x0061,
+    B  = 0x0062,
+    C  = 0x0063,
+    D  = 0x0064,
+    E  = 0x0065,
+    F  = 0x0066,
+    G  = 0x0067,
+    H  = 0x0068,
+    I  = 0x0069,
+    J  = 0x006A,
+    K  = 0x006B,
+    L  = 0x006C,
+    M  = 0x006D,
+    N  = 0x006E,
+    O  = 0x006F,
+    P  = 0x0070,
+    Q  = 0x0071,
+    R  = 0x0072,
+    S  = 0x0073,
+    T  = 0x0074,
+    U  = 0x0075,
+    V  = 0x0076,
+    W  = 0x0077,
+    X  = 0x0078,
+    Y  = 0x0079,
+    Z  = 0x007A,
+    _0 = 0x0030,
+    _1 = 0x0031,
+    _2 = 0x0032,
+    _3 = 0x0033,
+    _4 = 0x0034,
+    _5 = 0x0035,
+    _6 = 0x0036,
+    _7 = 0x0037,
+    _8 = 0x0038,
+    _9 = 0x0039,
+    F1 = 0x3B00,
+    F2 = 0x3C00,
+    F3 = 0x3D00,
+    F4 = 0x3E00,
+    F5 = 0x3F00,
+    F6 = 0x4000,
+    F7 = 0x4100,
+    F8 = 0x4200,
+    F9 = 0x4300,
+    F10= 0x4400,
 }
 
 impl AgiKeyCodes {
@@ -1275,7 +1315,7 @@ impl Interpretter {
             ConditionOperation::Has((item,)) => state.get_item_room(item)==255,
             ConditionOperation::ObjInRoom((item,var)) => { let n=state.get_var(var); state.get_item_room(item)==n },
             ConditionOperation::Posn((obj,num1,num2,num3,num4)) => is_left_edge_in_box(resources,state,obj,num1,num2,num3,num4),
-            ConditionOperation::Controller((key,)) => state.is_controller_pressed(key),
+            ConditionOperation::Controller((key,)) => { let pressed=state.is_controller_pressed(key); state.clear_key(key); pressed },
             ConditionOperation::HaveKey(_) => {
                 // Can lock up completely as often used like so :
                 //recheck:
@@ -1422,7 +1462,7 @@ impl Interpretter {
         } else {
             // todo check dialog flag timer thing, for now, any key to exit
             if !state.get_flag(&FLAG_LEAVE_WINDOW_OPEN) {
-                let key_pressed = state.key_len>0;
+                let key_pressed = state.is_key_pressed(&AgiKeyCodes::Enter) || state.is_key_pressed(&AgiKeyCodes::Escape);
                 state.clear_keys();
                 if key_pressed {
                     Self::close_windows(resources, state);
@@ -1430,7 +1470,7 @@ impl Interpretter {
                     return Some(pc.user_input());
                 }
             } else {
-                println!("Leave Window Open @{}",pc);
+                println!("Leave Window Open @{} v21: {}",pc,state.get_var(&VAR_MESSAGE_WINDOW_TIMER));
             }
         }
         Some(pc.next())
@@ -1520,7 +1560,7 @@ impl Interpretter {
             ActionOperation::SetPriority((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_priority(n); },
             ActionOperation::SetLoop((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_loop(n); },
             ActionOperation::SetCel((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_cel(n); },
-            ActionOperation::DrawPic((var,)) => { let n = state.get_var(var); resources.pictures[&usize::from(n)].render_to(&mut state.video_buffer,&mut state.priority_buffer).unwrap(); },
+            ActionOperation::DrawPic((var,)) => { let n = state.get_var(var); resources.pictures[&usize::from(n)].render_to(&mut state.picture_buffer,&mut state.priority_buffer).unwrap(); },
             ActionOperation::ShowPic(()) => {
                 let dpic = double_pic_width(state.picture());
                 for y in 0usize..PIC_HEIGHT_USIZE {
@@ -1727,7 +1767,7 @@ impl Interpretter {
             },
             ActionOperation::CloseWindow(()) => {
                 Self::close_windows(resources, state);
-                state.set_flag(&FLAG_LEAVE_WINDOW_OPEN, false);
+                //state.set_flag(&FLAG_LEAVE_WINDOW_OPEN, false);
             },
             ActionOperation::GetPriority((obj,var)) => state.set_var(var,state.object(obj).get_priority()),
             ActionOperation::LIndirectV((var1,var2)) => {let v = &TypeVar::from(state.get_var(var1)); state.set_var(v,state.get_var(var2)); },
@@ -1762,6 +1802,7 @@ impl Interpretter {
                     println!("Unhandled KeyCode : SetKey@{} {:?},{:?},{:?}",pc,a,b,c);
                 }
             },
+            ActionOperation::Pause(()) => return Interpretter::handle_window_request(resources, state, pc,String::from("      Game paused.\nPress Enter to continue."), 255, 255, 255),
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
@@ -2454,9 +2495,11 @@ fn render_view_to_pic(resources: &GameResources, state:&mut LogicState, view:u8,
             if col != t && h<=sy {
                 let sx = xx+x;
                 let sy = sy-h;
+                let picture_coord = sx+sy*PIC_WIDTH_USIZE;
                 let coord = sx*2+sy*SCREEN_WIDTH_USIZE;
                 let pri = fetch_priority_for_pixel_rendering(state,sx,sy);
                 if pri <= rpri {
+                    state.mut_picture()[picture_coord]=col; // render to picture buffer and back_buffer (in case show.pic has not yet occured)
                     state.mut_back_buffer()[coord]=col;
                     state.mut_back_buffer()[coord+1]=col;
                 }

@@ -1172,6 +1172,8 @@ impl LogicSequence {
         let mut offsets_rev:HashMap<usize, TypeGoto>=HashMap::new();
         let initial_size = logic_slice.len();
 
+        let version_2272 = &ResourcesVersion::new("2.272"); // BODGE FOR XMAS CARD
+
         let version_2089 = &ResourcesVersion::new("2.089");
         let version_2400 = &ResourcesVersion::new("2.400");
 
@@ -1377,6 +1379,22 @@ impl LogicSequence {
             operations.push(LogicOperation { action,address });
         }
 
+        // if the last action is not a return (it should be), append a return
+        match operations[operations.len()-1].action {
+            ActionOperation::Return(()) => {},
+            _ => {
+                if version != version_2272 {
+                    panic!("Unexpected requirement to patch logic - really need to re-write this so we can handle jumps midway into other instructions");
+                }
+                println!("Logic missing final return - patching!");
+                let program_position = initial_size;
+                let address:TypeGoto = (program_position as i16).into();
+                offsets.insert(address, operations.len());
+                offsets_rev.insert(operations.len(),address);
+                operations.push(LogicOperation {action:ActionOperation::Return(()),address});
+            },
+        }
+
         let mut labels:HashMap<TypeGoto, Label>=HashMap::new();
         let operations_len = operations.len();
         labels.reserve(operations_len);
@@ -1395,10 +1413,16 @@ impl LogicSequence {
                         if let Some(operation_offset) = offsets.get(&destination) {
                             e.insert(Label { is_goto_destination:is_goto, if_destination_cnt: if !is_goto {1} else {0}, operation_offset: *operation_offset});
                         } else {
-                            // workaround for MH1 there is a goto jumping into the middle of an IF, for now just move it beyond the if (this will miss a 0x08 0x00 0x84 )))
-                            let patch:TypeGoto = (445 as i16).into();
-                            e.insert(Label { is_goto_destination:is_goto, if_destination_cnt: if !is_goto {1} else {0}, operation_offset:offsets[&patch]});//operation_offset:operations_len});
-                            //operations.push(LogicOperation {action:ActionOperation::SetV((0))})
+                            if version == version_2272 {
+                                let patch:TypeGoto = (275 as i16).into();
+                                e.insert(Label { is_goto_destination:is_goto, if_destination_cnt: if !is_goto {1} else {0}, operation_offset:offsets[&patch]});//operation_offset:operations_len});
+                            } else {
+                                // workaround for MH1 there is a goto jumping into the middle of an IF, for now just move it beyond the if (this will miss a 0x08 0x00 0x84 )))
+                                let patch:TypeGoto = (445 as i16).into();
+                                e.insert(Label { is_goto_destination:is_goto, if_destination_cnt: if !is_goto {1} else {0}, operation_offset:offsets[&patch]});//operation_offset:operations_len});
+                                //operations.push(LogicOperation {action:ActionOperation::SetV((0))})
+
+                            }
                         }
                     } else {
                         if labels[&destination].operation_offset != offsets[&destination] {
