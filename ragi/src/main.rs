@@ -13,12 +13,12 @@ use imgui::*;
 
 
 const XMAS:bool=false;
-const DP1:bool=true;
+const DP1:bool=false;
 const KQ1:bool=false;
 const KQ2:bool=false;
 const KQ3:bool=false;
 const KQ4:bool=false;
-const LL1:bool=false;
+const LL1:bool=true;
 const SQ1:bool=false;
 const SQ2:bool=false;
 const SQ2_F:bool=false;
@@ -57,7 +57,7 @@ fn main() -> Result<(), String> {
         //interpretter.breakpoints.insert(LogicExecutionPosition::new(6,151), false);
 
         //cheat bypass questions
-        //interpretter.state.set_flag(&TypeFlag::from(109),true);
+        interpretter.state.set_flag(&TypeFlag::from(109),true);
     } else if SQ1 {
         interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/","2.089").unwrap();
         interpretter.set_breakpoint(5,54,false);

@@ -102,6 +102,7 @@ pub struct Sprite {
     move_flag:TypeFlag,
     move_step:FP16,
     wander_distance:FP16,
+    follow_distance:u8,
     ex:FP16,
     ey:FP16,
     step_size:FP16,
@@ -149,6 +150,7 @@ impl Sprite {
             move_flag: TypeFlag::from(0),
             move_step: FP16::from_num(0),
             wander_distance: FP16::from_num(0),
+            follow_distance: 0,
             ex: FP16::from_num(0),
             ey: FP16::from_num(0),
             step_size: FP16::from_num(1),
@@ -258,6 +260,8 @@ impl Sprite {
         if !self.get_visible() || !other.get_visible() {
             return 255;
         }
+
+        println!("TODO - Distance calculation should be Abs(y1-y2) + Abs((x1+w1/2) - (x2+w2/2)");   // ie center of baseline to center of baseline
 
         let x1:i16=self.get_x().into();
         let x2:i16=other.get_x().into();
@@ -461,7 +465,9 @@ impl Sprite {
         self.set_frozen(false);         // to confirm
         self.motion_kind=SpriteMotion::FollowEgo;
         self.move_flag= *f;
-        self.set_step_size(s)
+        self.follow_distance = if s==0 { self.get_step_size().to_num() } else {s};
+        self.wander_distance=FP16::from_num(0);
+        
     }
 
     pub fn clear_move(&mut self) {
@@ -2288,25 +2294,41 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
                 }
             },
             SpriteMotion::FollowEgo => {
-                let x=FP32::from(state.object(obj_num).get_x_fp16());
-                let y=FP32::from(state.object(obj_num).get_y_fp16());
-                let ex=FP32::from(state.object(&OBJECT_EGO).get_x_fp16());
-                let ey=FP32::from(state.object(&OBJECT_EGO).get_y_fp16());
-                let dx=ex.int()-x.int();
-                let dy=ey.int()-y.int();
-                let s = FP32::from(state.object(obj_num).get_step_size());
-                let direction = if dx.abs() <= s || dy.abs() <= s {
-                    0
-                } else {
-                    let sx = dx.signum();
-                    let sy = dy.signum();
-                    get_direction_from_delta(sx.to_num(), sy.to_num())
-                };
-                state.mut_object(obj_num).set_direction(direction);
-                if direction==0 {
-                    let mflag = state.object(obj_num).move_flag;
-                    state.set_flag(&mflag, true);
-                    state.mut_object(obj_num).clear_move();
+                let s = state.object(obj_num).get_step_size();
+                let t = state.object(obj_num).wander_distance.saturating_sub(s);
+                state.mut_object(obj_num).wander_distance=t;
+                if (state.object(obj_num)).wander_distance==FP16::from_num(0) {
+                    let x=FP32::from(state.object(obj_num).get_x_fp16());
+                    let y=FP32::from(state.object(obj_num).get_y_fp16());
+                    let ex=FP32::from(state.object(&OBJECT_EGO).get_x_fp16());
+                    let ey=FP32::from(state.object(&OBJECT_EGO).get_y_fp16());
+                    let dx=ex.int()-x.int();
+                    let dy=ey.int()-y.int();
+                    let s = FP32::from(state.object(obj_num).get_step_size());
+                    let d = state.object(obj_num).distance(state.object(&OBJECT_EGO));
+                    let direction = if dx.abs() <= s || dy.abs() <= s {
+                        0
+                    } else {
+                        let sx = dx.signum();
+                        let sy = dy.signum();
+                        get_direction_from_delta(sx.to_num(), sy.to_num())
+                    };
+                    state.mut_object(obj_num).set_direction(direction);
+                    if d <= state.object(obj_num).follow_distance {
+                        let mflag = state.object(obj_num).move_flag;
+                        state.set_flag(&mflag, true);
+                        state.mut_object(obj_num).clear_move();
+                        state.mut_object(obj_num).restore_step_size();
+                        if obj_num.get_value()==OBJECT_EGO.get_value() {
+                            state.set_player_control();
+                        }
+                    } else if !state.object(obj_num).has_moved() {
+                        // hit some sort of block, set randome direction, and random time to walk, then resume follow
+                        let direction = state.rng.gen_range(1u8..=8);
+                        let distance = state.rng.gen_range(6u8..=50u8);
+                        state.mut_object(obj_num).set_direction(direction);
+                        state.mut_object(obj_num).wander_distance=FP16::from_num(distance);
+                    }
                 }
             },
         }
@@ -2442,8 +2464,8 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
 }
 
 pub fn fetch_priority_for_pixel(state:&LogicState,x:usize,y:usize) -> u8 {
-    let xx = if (x>=PIC_WIDTH_USIZE) { PIC_WIDTH_USIZE-1} else { x };   // Won't be needed once shuffle and edge reposition are implemented
-    let yy = if (y>=PIC_HEIGHT_USIZE) { PIC_HEIGHT_USIZE-1} else { y };
+    let xx = if x>=PIC_WIDTH_USIZE { PIC_WIDTH_USIZE-1} else { x };   // Won't be needed once shuffle and edge reposition are implemented
+    let yy = if y>=PIC_HEIGHT_USIZE { PIC_HEIGHT_USIZE-1} else { y };
     state.priority()[xx+yy*PIC_WIDTH_USIZE]
 }
 
@@ -2633,9 +2655,8 @@ pub fn render_sprites(resources:&GameResources,state:&mut LogicState, disable_ba
 
 fn erase_all_add_to_pic(state:&mut LogicState) {
 
-    let mut obj_num = type_object_from_u8(255);
     for a in (0..=255u8).rev() {
-        obj_num = type_object_from_u8(a);
+        let obj_num = type_object_from_u8(a);
         if state.object(&obj_num).added_to_pic {
             state.mut_object(&obj_num).set_active(false);
         } 
