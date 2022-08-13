@@ -11,97 +11,9 @@ use sdl2::event::Event;
 use sdl2::keyboard::{Keycode, Scancode};
 use imgui::*;
 
-struct TexturesUi {
-    generated_textures: Vec<TextureId>,
-    gl_textures: Vec<u32>,
-}
 
-impl TexturesUi {
-    fn new(gl: &glow::Context, textures: &mut Textures<glow::Texture>,num:usize) -> Self {
-        let mut generated_textures:Vec<TextureId> = Vec::new();
-        let mut gl_textures:Vec<u32> = Vec::new();
-        generated_textures.reserve(num);
-        gl_textures.reserve(num);
-        for _ in 0..num {
-            let (generated_texture,gl_texture) = Self::generate(gl, textures);
-            generated_textures.push(generated_texture);
-            gl_textures.push(gl_texture);
-        }
-        Self {
-            generated_textures,gl_textures
-        }
-    }
-
-    fn get_generated_texture(&self,index:usize) -> TextureId {
-        self.generated_textures[index]
-    }
-
-    pub fn update(&self,gl:&glow::Context,index:usize, width:usize,height:usize,data:&[u8]) {
-        unsafe {
-            gl.bind_texture(glow::TEXTURE_2D, Some(self.gl_textures[index]));
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::RGB as _, // When generating a texture like this, you're probably working in linear color space
-                width as _,
-                height as _,
-                0,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                Some(data),
-            )
-        }
-    }
-
-    /// Generate dummy 1x1 texture with sane settings - Will be overwritten by gui later
-    fn generate(
-        gl: &glow::Context,
-        textures: &mut Textures<glow::Texture>,
-    ) -> (TextureId,u32) {
-        let mut data = Vec::with_capacity(1 * 1);
-        for i in 0..1 {
-            for j in 0..1 {
-                // Insert RGB values
-                data.push(i as u8);
-                data.push(j as u8);
-                data.push((i + j) as u8);
-                data.push(255u8);
-            }
-        }
-
-        let gl_texture = unsafe { gl.create_texture() }.expect("unable to create GL texture");
-
-        unsafe {
-            gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture));
-            gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_MIN_FILTER,
-                glow::NEAREST as _,
-            );
-            gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_MAG_FILTER,
-                glow::NEAREST as _,
-            );
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::RGB as _, // When generating a texture like this, you're probably working in linear color space
-                1 as _,
-                1 as _,
-                0,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                Some(&data),
-            )
-        }
-
-        (textures.insert(gl_texture),gl_texture)
-    }
-}
-
-const XMAS:bool=true;
-const DP1:bool=false;
+const XMAS:bool=false;
+const DP1:bool=true;
 const KQ1:bool=false;
 const KQ2:bool=false;
 const KQ3:bool=false;
@@ -120,9 +32,10 @@ fn main() -> Result<(), String> {
 
     if XMAS {
         interpretter=Interpretter::new("../images/AGI-XMAS/","2.272").unwrap();
-        interpretter.set_breakpoint(2,1,true);
+        //interpretter.set_breakpoint(35,1,true);
     } else if DP1 {
         interpretter=Interpretter::new("../images/agi_demo_pack_1/","2.915").unwrap();
+        interpretter.set_breakpoint(161,1,true);
     } else if KQ1 {
         //interpretter=Interpretter::new("../images/King's Quest v2.0F (AGI 2.425) (1987)(Sierra On-Line, Inc.) [Adventure]/","2.425").unwrap();
         interpretter=Interpretter::new("../images/King's Quest v1.0U (1986)(Sierra On-Line, Inc.) [Adventure][!]/","2.272").unwrap();
@@ -196,7 +109,7 @@ fn main() -> Result<(), String> {
         .expect("failed to create renderer");
     let mut event_pump = sdl_context.event_pump()?;
 
-    let textures_ui = TexturesUi::new(&gl,&mut textures,64);
+    let textures_ui = TexturesUi::new(&gl,&mut textures,10+256*2);
 
     let live_debug_view=false;
     let mut debug_texture_index:usize=0;
@@ -250,11 +163,12 @@ fn main() -> Result<(), String> {
         });
 
         Window::new("OBJECTS").build(&ui, || {
-            for index in interpretter.state.active_objects_indices() {
+            for index in interpretter.state.active_objects_indices_sorted_pri_y() {
                 let obj_num = &TypeObject::from(index as u8);
                 let obj=interpretter.state.object(obj_num);
                 let visible = obj.get_visible();
-                TreeNode::new(format!("Object {}",index)).flags(if visible {TreeNodeFlags::BULLET} else {TreeNodeFlags::OPEN_ON_ARROW}).build(&ui, || {
+                let priority = obj.get_priority();
+                TreeNode::new(format!("Object {} : Priority {}",index,priority)).flags(if visible {TreeNodeFlags::BULLET} else {TreeNodeFlags::OPEN_ON_ARROW}).build(&ui, || {
                     let mut c = usize::from(obj.get_cel());
                     let cels = get_cells_clamped(&interpretter.resources, &obj);
                     if c>=cels.len() {
@@ -470,5 +384,94 @@ pub fn map_keycodes(code:Keycode,_scode:Scancode) -> Option<AgiKeyCodes> {
         Keycode::F9 => Some(AgiKeyCodes::F9),
         Keycode::F10 => Some(AgiKeyCodes::F10),
         _ => {/* println!("Unmapped Keycode {} : {}",code as i32,scode as i32);*/ None},
+    }
+}
+
+struct TexturesUi {
+    generated_textures: Vec<TextureId>,
+    gl_textures: Vec<u32>,
+}
+
+impl TexturesUi {
+    fn new(gl: &glow::Context, textures: &mut Textures<glow::Texture>,num:usize) -> Self {
+        let mut generated_textures:Vec<TextureId> = Vec::new();
+        let mut gl_textures:Vec<u32> = Vec::new();
+        generated_textures.reserve(num);
+        gl_textures.reserve(num);
+        for _ in 0..num {
+            let (generated_texture,gl_texture) = Self::generate(gl, textures);
+            generated_textures.push(generated_texture);
+            gl_textures.push(gl_texture);
+        }
+        Self {
+            generated_textures,gl_textures
+        }
+    }
+
+    fn get_generated_texture(&self,index:usize) -> TextureId {
+        self.generated_textures[index]
+    }
+
+    pub fn update(&self,gl:&glow::Context,index:usize, width:usize,height:usize,data:&[u8]) {
+        unsafe {
+            gl.bind_texture(glow::TEXTURE_2D, Some(self.gl_textures[index]));
+            gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                glow::RGB as _, // When generating a texture like this, you're probably working in linear color space
+                width as _,
+                height as _,
+                0,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                Some(data),
+            )
+        }
+    }
+
+    /// Generate dummy 1x1 texture with sane settings - Will be overwritten by gui later
+    fn generate(
+        gl: &glow::Context,
+        textures: &mut Textures<glow::Texture>,
+    ) -> (TextureId,u32) {
+        let mut data = Vec::with_capacity(1 * 1);
+        for i in 0..1 {
+            for j in 0..1 {
+                // Insert RGB values
+                data.push(i as u8);
+                data.push(j as u8);
+                data.push((i + j) as u8);
+                data.push(255u8);
+            }
+        }
+
+        let gl_texture = unsafe { gl.create_texture() }.expect("unable to create GL texture");
+
+        unsafe {
+            gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture));
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MIN_FILTER,
+                glow::NEAREST as _,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MAG_FILTER,
+                glow::NEAREST as _,
+            );
+            gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                glow::RGB as _, // When generating a texture like this, you're probably working in linear color space
+                1 as _,
+                1 as _,
+                0,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                Some(&data),
+            )
+        }
+
+        (textures.insert(gl_texture),gl_texture)
     }
 }

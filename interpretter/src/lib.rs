@@ -8,7 +8,7 @@ use itertools::Itertools;
 use logic::*;
 use objects::{Objects, Object};
 use picture::*;
-use rand::{rngs::ThreadRng, Rng, random};
+use rand::{rngs::ThreadRng, Rng};
 use view::{ViewResource, ViewLoop, ViewCel};
 use volume::Volume;
 use words::Words;
@@ -73,11 +73,12 @@ pub enum SpriteCycle {
 
 #[derive(Debug)] // TODO revisit copy
 pub struct Sprite {
-    active:bool,    // object is processed
-    moved:bool,     // object moved last tick
-    frozen:bool,    // object ignores updates (animation/etc)
-    visible:bool,   // draw to screen (draw/erase, to confirm if this is automated (sprite), or blit)
-    motion:bool,    // movement is applied
+    active:bool,        // object is processed
+    added_to_pic:bool,  // object was added via add_to_pic command
+    moved:bool,         // object moved last tick
+    frozen:bool,        // object ignores updates (animation/etc)
+    visible:bool,       // draw to screen (draw/erase, to confirm if this is automated (sprite), or blit)
+    motion:bool,        // movement is applied
     observing:bool,         // treats other objects as obstacles
     ignore_barriers:bool,   // ignores pixels of priority and block set with block_command
     ignore_horizon:bool,    // ignores horizon position during movement
@@ -91,6 +92,9 @@ pub struct Sprite {
     view:u8,
     cloop:u8,
     cel:u8,
+    render_view:u8, // make these &view,&loop,&cel to save looking them all the time
+    render_cloop:u8,
+    render_cel:u8,
     x:FP16,           // bottom left corner
     y:FP16,
     priority:u8,
@@ -117,6 +121,7 @@ impl Sprite {
     pub fn new() -> Sprite {
         Sprite { 
             active: false, 
+            added_to_pic: false,
             moved: false,
             frozen: false,
             visible: false,
@@ -134,6 +139,9 @@ impl Sprite {
             view: 0, 
             cloop: 0,
             cel: 0,
+            render_view: 0,
+            render_cloop: 0,
+            render_cel: 0,
             x:FP16::from_num(0), 
             y:FP16::from_num(0),
             priority:0,
@@ -164,15 +172,15 @@ impl Sprite {
     }
 
     pub fn get_view(&self) -> u8 {
-        self.view
+        self.render_view
     }
 
     pub fn get_loop(&self) -> u8 {
-        self.cloop
+        self.render_cloop
     }
 
     pub fn get_cel(&self) -> u8 {
-        self.cel
+        self.render_cel
     }
 
     pub fn get_visible(&self) -> bool {
@@ -297,10 +305,20 @@ impl Sprite {
     
     pub fn set_frozen(&mut self,b:bool) {
         self.frozen=b;
+        if b {
+            self.render_view=self.view;
+            self.render_cloop=self.cloop;
+            self.render_cel=self.cel;
+        }
     }
 
     pub fn set_visible(&mut self,b:bool) {
         self.visible=b;
+        if b {
+            self.render_view=self.view;
+            self.render_cloop=self.cloop;
+            self.render_cel=self.cel;
+        }
     }
 
     pub fn set_observing(&mut self,b:bool) {
@@ -329,6 +347,11 @@ impl Sprite {
 
     pub fn set_cycling(&mut self,b:bool) {
         self.cycle=b;
+        if b {
+            self.render_view=self.view;
+            self.render_cloop=self.cloop;
+            self.render_cel=self.cel;
+        }
     }
 
     pub fn set_step_time(&mut self,n:u8) {
@@ -469,6 +492,11 @@ impl Sprite {
         self.restrict_to_water=false;
     }
 
+    pub fn set_on_anything(&mut self) {
+        self.restrict_to_land=false;
+        self.restrict_to_water=false;
+    }
+
     pub fn set_wander(&mut self,dist:u8) {
         self.motion_kind=SpriteMotion::Wander;
         self.wander_distance=FP16::from_num(dist);
@@ -477,7 +505,6 @@ impl Sprite {
 
     pub fn set_normal_motion(&mut self) {
         self.motion_kind=SpriteMotion::Normal;
-        self.set_enable_motion(true);   // to confirm
     }
 
     pub fn set_enable_motion(&mut self,b:bool) {
@@ -588,7 +615,7 @@ pub struct LogicState {
     horizon:u8,
     flag:[bool;256],
     var:[u8;256],
-    objects:[Sprite;256],   // overkill, todo add list of active
+    objects:[Sprite;256],   // overkill, for now, add.to.pics start at 255 and grow down, todo add list of active
     string:[String;256],    // overkill
     words:[u16;256],        // overkill
     logic_start:[usize;256],
@@ -780,6 +807,7 @@ impl LogicState {
     pub fn unanimate_all(&mut self) {
         for (_,obj) in self.mut_active_objects() {
             obj.set_active(false);
+            obj.set_visible(false);
         }
     }
 
@@ -888,7 +916,7 @@ impl LogicState {
         t_indices.into_iter()
     }
     
-    fn compare_pri_y(&self,a:&Sprite,b:&Sprite) -> Ordering {
+    fn compare_pri_y(&self,ai:&usize,bi:&usize,a:&Sprite,b:&Sprite) -> Ordering {
         let ap = a.get_priority();
         let bp = b.get_priority();
         if ap<bp {
@@ -896,14 +924,28 @@ impl LogicState {
         } else if ap>bp {
             return Ordering::Greater;
         } else {
-            Ord::cmp(&a.get_y_fp16(),&b.get_y_fp16())
+            if a.added_to_pic && !b.added_to_pic {
+                return Ordering::Less;
+            } else if !a.added_to_pic && b.added_to_pic {
+                return Ordering::Greater
+            } else {
+                let ay = a.get_y();
+                let by = b.get_y();
+                if ay<by {
+                    return Ordering::Less;
+                } else if ay>by {
+                    return Ordering::Greater;
+                } else {
+                    Ord::cmp(&ai,&bi)
+                }
+            }
         }
     }
 
     pub fn active_objects_indices_sorted_pri_y(&self) -> impl Iterator<Item = usize> {
         let t_indices:Vec<usize> = (0..self.objects.len())
             .filter(|b| self.object(&type_object_from_u8(*b as u8)).is_active())
-            .sorted_unstable_by(|a,b| self.compare_pri_y(&self.object(&type_object_from_u8(*a as u8)),&self.object(&type_object_from_u8(*b as u8))))
+            .sorted_by(|a,b| self.compare_pri_y(a,b,&self.object(&type_object_from_u8(*a as u8)),&self.object(&type_object_from_u8(*b as u8))))
             .collect_vec();
         t_indices.into_iter()
     }
@@ -1391,10 +1433,11 @@ impl Interpretter {
         for (_,obj) in state.mut_active_objects() {
             obj.set_active(false);
             obj.set_visible(false);
+            obj.added_to_pic=false;
             obj.set_normal_motion();
             obj.set_direction(0);
             obj.set_cycling(false);
-            //obj.set_priority_auto();    // ??
+            obj.set_priority_auto();
             //obj.reset();//  (may not be needed)
             obj.set_step_size(1);
             obj.set_step_time(1);
@@ -1497,6 +1540,8 @@ impl Interpretter {
                 println!("Leave Window Open @{} v21: {}",pc,state.get_var(&VAR_MESSAGE_WINDOW_TIMER));
             }
         }
+        state.set_flag(&FLAG_LEAVE_WINDOW_OPEN,false);
+        state.set_var(&VAR_MESSAGE_WINDOW_TIMER,0);
         Some(pc.next())
     }
 
@@ -1569,7 +1614,14 @@ impl Interpretter {
             ActionOperation::NewRoomV((var,)) => { state.set_new_room(state.get_var(var)); return None },
             ActionOperation::Reset((flag,)) => state.set_flag(flag, false),
             ActionOperation::ResetV((var,)) => { let flag=&TypeFlag::from(state.get_var(var)); state.set_flag(flag, false); },
-            ActionOperation::AnimateObj((obj,)) => state.mut_object(obj).set_active(true),
+            ActionOperation::AnimateObj((obj,)) => { 
+                if !state.object(obj).active {
+                    state.mut_object(obj).set_active(true);
+                    state.mut_object(obj).set_enable_motion(true);
+                    state.mut_object(obj).set_cycling(true);
+                    state.mut_object(obj).set_frozen(false);
+                }
+            },
             ActionOperation::SetView((obj,num)) => {let n=state.get_num(num); state.mut_object(obj).set_view(n,resources); },
             ActionOperation::SetViewV((obj,var)) => {let n=state.get_var(var); state.mut_object(obj).set_view(n,resources); },
             ActionOperation::ObserveObjs((obj,)) => state.mut_object(obj).set_observing(true),
@@ -1584,7 +1636,7 @@ impl Interpretter {
             ActionOperation::SetPriority((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_priority(n); },
             ActionOperation::SetLoop((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_loop(n); },
             ActionOperation::SetCel((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_cel(n); },
-            ActionOperation::DrawPic((var,)) => { let n = state.get_var(var); resources.pictures[&usize::from(n)].render_to(&mut state.picture_buffer,&mut state.priority_buffer).unwrap(); },
+            ActionOperation::DrawPic((var,)) => { let n = state.get_var(var); resources.pictures[&usize::from(n)].render_to(&mut state.picture_buffer,&mut state.priority_buffer).unwrap(); erase_all_add_to_pic(state); },
             ActionOperation::ShowPic(()) => {
                 let dpic = double_pic_width(state.picture());
                 for y in 0usize..PIC_HEIGHT_USIZE {
@@ -1615,7 +1667,8 @@ impl Interpretter {
                 }
                 for y in start..=end {
                     for x in 0usize..SCREEN_WIDTH_USIZE {
-                        state.text_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
+                        state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
+                        state.text_buffer[x+y*SCREEN_WIDTH_USIZE] = 255;
                     }
                 }
             },
@@ -1690,8 +1743,8 @@ impl Interpretter {
             ActionOperation::StatusLineOn(()) => state.set_status_visible(true),
             ActionOperation::AcceptInput(()) => state.set_input(true),
             ActionOperation::StartCycling((obj,)) => state.mut_object(obj).set_cycling(true),
-            ActionOperation::ObjectOnWater((obj,)) => state.mut_object(obj).set_restrict_to_water(),
-            ActionOperation::ObjectOnLand((obj,)) => state.mut_object(obj).set_restrict_to_land(),
+            ActionOperation::ObjectOnWater((obj,)) => { state.mut_object(obj).set_restrict_to_water(); shuffle(state, resources, obj); },
+            ActionOperation::ObjectOnLand((obj,)) => { state.mut_object(obj).set_restrict_to_land(); shuffle(state, resources, obj); },
             ActionOperation::Wander((obj,)) => {
                 let dist=state.rng.gen_range(6u8..=50u8);
                 state.mut_object(obj).set_wander(dist);
@@ -1705,9 +1758,19 @@ impl Interpretter {
             ActionOperation::PlayerControl(()) => state.set_player_control(),
             ActionOperation::LastCel((obj,var)) => { let cels = get_cells_clamped(resources,state.object(obj)); state.set_var(var,(cels.len()-1) as u8); },
             ActionOperation::SetCelV((obj,var)) => { let n=state.get_var(var); state.mut_object(obj).set_cel(n); },
-            ActionOperation::StopMotion((obj,)) => state.mut_object(obj).set_enable_motion(false),
+            ActionOperation::StopMotion((obj,)) => {
+                state.mut_object(obj).set_enable_motion(false);
+                if *obj==OBJECT_EGO {
+                    state.set_program_control();
+                }
+            },
             ActionOperation::NormalMotion((obj,)) => state.mut_object(obj).set_normal_motion(),
-            ActionOperation::StartMotion((obj,)) => state.mut_object(obj).set_enable_motion(true),
+            ActionOperation::StartMotion((obj,)) => {
+                state.mut_object(obj).set_enable_motion(true);
+                if *obj==OBJECT_EGO {
+                    state.set_player_control();
+                }
+            },
             ActionOperation::AddN((var,num)) => state.set_var(var,state.get_var(var).wrapping_add(state.get_num(num))),
             ActionOperation::AddV((var1,var2)) => state.set_var(var1,state.get_var(var1).wrapping_add(state.get_var(var2))),
             ActionOperation::SubN((var,num)) => state.set_var(var,state.get_var(var).wrapping_sub(state.get_num(num))),
@@ -1737,11 +1800,11 @@ impl Interpretter {
                 let view=state.get_num(num1);
                 let cloop=state.get_num(num2);
                 let cel=state.get_num(num3);
-                let x=state.get_num(num4) as usize;
-                let y=state.get_num(num5) as usize;
+                let x=state.get_num(num4);
+                let y=state.get_num(num5);
                 let rpri=state.get_num(num6);
                 let margin=state.get_num(num7);
-                render_view_to_pic(resources, state, view, cloop, cel, x, y, rpri, margin);
+                add_view_to_pic(resources, state, view, cloop, cel, x, y, rpri, margin);
             },
             ActionOperation::SetScanStart(()) => state.set_logic_start(&pc.next()),
             ActionOperation::ResetScanStart(()) => state.clear_logic_start(&pc.next()),
@@ -1816,11 +1879,11 @@ impl Interpretter {
                 let view=state.get_var(var1);
                 let cloop=state.get_var(var2);
                 let cel=state.get_var(var3);
-                let x=state.get_var(var4) as usize;
-                let y=state.get_var(var5) as usize;
+                let x=state.get_var(var4);
+                let y=state.get_var(var5);
                 let rpri=state.get_var(var6);
                 let margin=state.get_var(var7);
-                render_view_to_pic(resources, state, view, cloop, cel, x, y, rpri, margin);
+                add_view_to_pic(resources, state, view, cloop, cel, x, y, rpri, margin);
             },
             ActionOperation::RIndirect((var1,var2)) => {let v = &TypeVar::from(state.get_var(var2)); state.set_var(var1,state.get_var(v)); },
             ActionOperation::NormalCycle((obj,)) => state.mut_object(obj).set_normal_cycle(),
@@ -1839,6 +1902,27 @@ impl Interpretter {
                 }
             },
             ActionOperation::Pause(()) => return Interpretter::handle_window_request(resources, state, pc,String::from("      Game paused.\nPress Enter to continue."), 255, 255, 255),
+            ActionOperation::ClearTextRect((num1,num2,num3,num4,num5)) => {
+                let r1=usize::from(state.get_num(num1))*8;
+                let c1=usize::from(state.get_num(num2))*8;
+                let r2=usize::from(state.get_num(num3))*8+7;
+                let c2=usize::from(state.get_num(num4))*8+7;
+                let input_col = state.get_num(num5);
+                let col;
+                if state.text_mode {
+                    col=0;
+                } else {
+                    col = if input_col==0 { 0 } else { 15 };
+                }
+                for x in c1..=c2 {
+                    for y in r1..=r2 {
+                        state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
+                        state.text_buffer[x+y*SCREEN_WIDTH_USIZE] = 255;
+                    }
+                }
+            },
+            ActionOperation::ObjectOnAnything((obj,)) => state.mut_object(obj).set_on_anything(),
+            ActionOperation::MulN((var,num)) => state.set_var(var,state.get_var(var).wrapping_mul(state.get_num(num))),
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
@@ -2331,9 +2415,6 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
     for pri in slice {
         let pri=*pri;
         water&=pri==3;
-        if pri == 3 && obj.is_restricted_to_land() {
-            blocked=true;
-        }
         if pri != 3 && obj.is_restricted_to_water() {
             blocked=true;
         }
@@ -2349,6 +2430,9 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
             signal=true;
         }
     }
+    if water && obj.is_restricted_to_land() {
+        blocked=true;
+    }
 
     if blocked {
         return (false,nx,ny,water,signal);
@@ -2358,7 +2442,9 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
 }
 
 pub fn fetch_priority_for_pixel(state:&LogicState,x:usize,y:usize) -> u8 {
-    state.priority()[x+y*PIC_WIDTH_USIZE]
+    let xx = if (x>=PIC_WIDTH_USIZE) { PIC_WIDTH_USIZE-1} else { x };   // Won't be needed once shuffle and edge reposition are implemented
+    let yy = if (y>=PIC_HEIGHT_USIZE) { PIC_HEIGHT_USIZE-1} else { y };
+    state.priority()[xx+yy*PIC_WIDTH_USIZE]
 }
 
 pub fn fetch_priority_for_pixel_rendering(state:&LogicState,x:usize,y:usize) -> u8 {
@@ -2445,7 +2531,7 @@ pub fn update_anims(resources:&GameResources,state:&mut LogicState) {
         let obj_num = TypeObject::from(num as u8);
         let c = usize::from(state.object(&obj_num).get_cel());
 
-        if !state.object(&obj_num).frozen {
+        if !state.object(&obj_num).frozen && state.object(&obj_num).visible {
             if !state.object(&obj_num).fixed_loop {
                 let loops = get_loops(resources, state.object(&obj_num));
                 match loops.len() {
@@ -2519,6 +2605,9 @@ pub fn update_anims(resources:&GameResources,state:&mut LogicState) {
                     }
                 }
             }
+            state.mut_object(&obj_num).render_view=state.object(&obj_num).view;
+            state.mut_object(&obj_num).render_cloop=state.object(&obj_num).cloop;
+            state.mut_object(&obj_num).render_cel=state.object(&obj_num).cel;
         }
     }
 
@@ -2529,59 +2618,70 @@ pub fn render_sprites(resources:&GameResources,state:&mut LogicState, disable_ba
 
     for num in state.active_objects_indices_sorted_pri_y() {
         let obj_num = TypeObject::from(num as u8);
-        let mut c = usize::from(state.object(&obj_num).get_cel());
-        let cels = get_cells_clamped(resources, state.object(&obj_num));
-        if c>=cels.len() {
-            c=cels.len()-1;
-        }
-        let cell = &cels[c];
-
         if state.object(&obj_num).visible {
+            let mut c = usize::from(state.object(&obj_num).get_cel());
+            let cels = get_cells_clamped(resources, state.object(&obj_num));
+            if c>=cels.len() {
+                c=cels.len()-1;
+            }
+            let cell = &cels[c];
+
             render_sprite(&obj_num, cell, state);
         }
     }
 }
 
-fn render_view_to_pic(resources: &GameResources, state:&mut LogicState, view:u8, cloop:u8, cel:u8, x:usize, y:usize, rpri:u8, margin:u8) {
+fn erase_all_add_to_pic(state:&mut LogicState) {
+
+    let mut obj_num = type_object_from_u8(255);
+    for a in (0..=255u8).rev() {
+        obj_num = type_object_from_u8(a);
+        if state.object(&obj_num).added_to_pic {
+            state.mut_object(&obj_num).set_active(false);
+        } 
+    }
+}
+
+fn add_view_to_pic(resources: &GameResources, state:&mut LogicState, view:u8, cloop:u8, cel:u8, x:u8, y:u8, rpri:u8, margin:u8) {
+
+    // find free slot
+    let mut obj_num = type_object_from_u8(255);
+    for a in (0..=255u8).rev() {
+        obj_num = type_object_from_u8(a);
+        if !state.object(&obj_num).active {
+            break;
+        }
+    }
+
+    // assume we found a free one at the top of the list, setup the object as if its an added to pic
+
+    state.mut_object(&obj_num).set_active(true);
+    state.mut_object(&obj_num).added_to_pic=true;
+    state.mut_object(&obj_num).set_view(view,resources);
+    state.mut_object(&obj_num).set_loop(cloop);
+    state.mut_object(&obj_num).set_cel(cel);
+    state.mut_object(&obj_num).set_visible(true);
+    state.mut_object(&obj_num).set_frozen(true);
+    state.mut_object(&obj_num).set_enable_motion(false);
+    state.mut_object(&obj_num).set_priority(rpri);
+    state.mut_object(&obj_num).set_x(x);
+    state.mut_object(&obj_num).set_y(y);
+
+
     let view = &resources.views[&(view as usize)];
     let loops = &view.get_loops()[cloop as usize];
     let cel = &loops.get_cels()[cel as usize];
-    let t = cel.get_transparent_colour();
-    let d = cel.get_data();
-    let mirror=cel.is_mirror(cloop);
-    let w = cel.get_width().into();
-    let h = cel.get_height().into();
+    let w:usize = cel.get_width().into();
+    let h:usize = cel.get_height().into();
 
-    shuffle_with_vars(state,resources);
+    shuffle(state,resources,&obj_num);
 
-    if rpri == 0 {
-        println!("render_view_to_pic - need to fetch priority for 0");
-    }
-
-    for yy in 0..h {
-        for xx in 0..w {
-            let col = if mirror {d[(w-xx-1)+yy*w]} else {d[xx+yy*w] };
-            let sy = yy+y;
-            if col != t && h<=sy {
-                let sx = xx+x;
-                let sy = sy-h;
-                let picture_coord = sx+sy*PIC_WIDTH_USIZE;
-                let coord = sx*2+sy*SCREEN_WIDTH_USIZE;
-                let pri = fetch_priority_for_pixel_rendering(state,sx,sy);
-                if pri <= rpri {
-                    state.mut_picture()[picture_coord]=col; // render to picture buffer and back_buffer (in case show.pic has not yet occured)
-                    state.mut_back_buffer()[coord]=col;
-                    state.mut_back_buffer()[coord+1]=col;
-                }
-            }
-        }
-    }
     // render control value
     if margin<4 {
         println!("TODO : RENDER BOX, NOT just baseline for MARGIN");
         for xx in 0..w {
-            let sx = xx+x;
-            let sy = y;
+            let sx = xx+(x as usize);
+            let sy = y as usize;
             let coord = sx+sy*PIC_WIDTH_USIZE;
             state.priority_buffer[coord]=margin;
         }
@@ -2637,10 +2737,6 @@ fn render_sprite(obj_num:&TypeObject, cell: &view::ViewCel, state: &mut LogicSta
     }
 }
 
-fn shuffle_with_vars(state:&mut LogicState,resources:&GameResources) {
-    println!("TO IMPLEMENT - SHUFFLE");
-}
-
 fn shuffle(state:&mut LogicState,resources:&GameResources,obj:&TypeObject) {
-    shuffle_with_vars(state, resources);    // TODO expand object into needed vars
+    println!("TO IMPLEMENT - SHUFFLE");
 }
