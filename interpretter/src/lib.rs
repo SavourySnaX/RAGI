@@ -690,6 +690,8 @@ pub struct LogicState {
     objects:[Sprite;256],   // overkill, for now, add.to.pics start at 255 and grow down, todo add list of active
     string:[String;256],    // overkill
     words:[u16;256],        // overkill
+    words_offsets:[usize;256],
+    words_found:usize,
     logic_start:[usize;256],
     item_location:[u8;256],
 
@@ -745,6 +747,8 @@ impl LogicState {
             objects: [();256].map(|_| Sprite::new()),
             string: [();256].map(|_| String::new()),
             words: [0u16;256],
+            words_offsets: [0usize;256],
+            words_found: 0,
             item_location: [0u8;256],
             logic_start: [0usize;256],
             num_string: String::from(""),
@@ -776,12 +780,7 @@ impl LogicState {
     }
 
     pub fn get_parsed_word_num(&self,num:u8) -> String {
-        for (idx,w) in self.parsed_input_string.split(' ').enumerate() {
-            if idx==(num as usize)-1 {
-                return w.to_string();
-            }
-        } 
-        String::from("??")
+        self.parsed_input_string[self.words_offsets[num.saturating_sub(1) as usize]..].to_string()
     }
 
     pub fn get_flags(&self) -> impl Iterator<Item = bool> {
@@ -865,6 +864,11 @@ impl LogicState {
             return false;
         }
 
+        let mut expected=self.words_found;
+        if to_check.len()>expected {
+            return false;
+        }
+
         for (index,word) in to_check.iter().enumerate() {
             // Match any word, but out of words to match against
             if word.get_value() == 1 && self.words[index]==0 {
@@ -872,12 +876,17 @@ impl LogicState {
             }
             // Match remainder of input
             if word.get_value() == 9999 {
+                expected=0;
                 break;
             }
             // Word does not match
             if word.get_value() != self.words[index] {
                 return false;
             }
+            expected-=1;
+        }
+        if expected!=0 {
+            return false;
         }
         self.set_flag(&FLAG_SAID_ACCEPTED_INPUT, true);
         true
@@ -1072,7 +1081,7 @@ impl LogicState {
         &self.final_buffer
     }
 
-    pub fn render_final_buffer(&mut self) {
+    pub fn render_final_buffer(&mut self,resources:&GameResources) {
         if self.text_mode {
             self.final_buffer = [0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
         } else {
@@ -1085,6 +1094,8 @@ impl LogicState {
                         self.final_buffer[x+(y+(self.status_line as usize)*8)*SCREEN_WIDTH_USIZE]=15;
                     }
                 }
+                let s = &format!("Score {:3} out of {}       Sound : {}",self.get_var(&VAR_CURRENT_SCORE),self.get_var(&VAR_MAXIMUM_SCORE),"none");
+                Interpretter::display_text(resources, self, 0, self.status_line, s, 0, 15)
             }
         }
 
@@ -1457,7 +1468,7 @@ impl Interpretter {
 
         render_sprites(&self.resources,mutable_state,false);
 
-        mutable_state.render_final_buffer();
+        mutable_state.render_final_buffer(&self.resources);
     }
 
     fn evaluate_condition_operation(resources:&GameResources,state:&mut LogicState,op:&ConditionOperation,need_tick:&mut bool) -> bool {
@@ -1536,6 +1547,7 @@ impl Interpretter {
             obj.set_ignore_barriers(false);
             obj.set_ignore_horizon(false);
             obj.set_observing(true);
+            obj.set_fixed_loop(false);
             obj.set_priority_auto();
             //obj.reset();//  (may not be needed)
             obj.set_step_size(1);
@@ -1606,7 +1618,11 @@ impl Interpretter {
                 2 => if c>=b'0' && c<=b'9' { num*=10; num+=c-b'0'; } else 
                 {
                     Self::append_expansion_to_message(state, resources, file, &mut new_string,num,n_kind);
-                    new_string.push(c as char); c_state=0;
+                    if c==b'%' {  // TODO '|'
+                        c_state=1;
+                    } else {
+                        new_string.push(c as char); c_state=0;
+                    }
                 }
                 _ => todo!(),
             }
@@ -2216,16 +2232,43 @@ pub fn parse_input_string(state: &mut LogicState, s: String, resources: &GameRes
     let mut w_idx=0usize;
     state.words=[0u16;256];
     state.set_var(&VAR_MISSING_WORD,0);
-    for (index,w) in state.parsed_input_string.split(' ').enumerate() {
-        let t = w.trim();
-        if !t.is_empty() {
-            match resources.words.get(t) {
-                None => { state.set_var(&VAR_MISSING_WORD, index.saturating_add(1) as u8); break; },
-                Some(0u16) => {},
-                Some(b) => { state.words[w_idx]=*b; w_idx+=1; },
+    // We need to parse greedy (e.g. ken sent me , will match in LL1)
+    let mut s=0usize;
+    let e=state.parsed_input_string.len();
+
+    loop {
+        let mut last_i=s;
+        let mut w_num=0u16;
+        for i in (s..e).rev() {
+            if let Some(a) = resources.words.get(&state.parsed_input_string[s..=i]) {
+                last_i=i;
+                w_num=*a;
+                break;
+            } 
+        }
+
+        if last_i == s {
+            // failed to match
+            state.words_offsets[w_idx]=last_i;
+            state.set_var(&VAR_MISSING_WORD, w_idx.saturating_add(1) as u8);
+            break;
+        } else {
+            if w_num != 0 {
+                state.words[w_idx]=w_num;
+                state.words_offsets[w_idx]=last_i;
+                w_idx+=1;
+                state.words_found=w_idx;
+            }
+            s=last_i+1;
+            while s!=e && state.parsed_input_string.as_bytes()[s]==b' ' {
+                s+=1;
+            }
+            if s==e {
+                break;
             }
         }
     }
+
     state.set_flag(&FLAG_COMMAND_ENTERED,state.parsed_input_string.len()!=0);
     state.set_flag(&FLAG_SAID_ACCEPTED_INPUT,false);
 }
