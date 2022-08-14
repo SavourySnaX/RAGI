@@ -13,12 +13,12 @@ use imgui::*;
 
 
 const XMAS:bool=false;
-const DP1:bool=true;
+const DP1:bool=false;
 const KQ1:bool=false;
 const KQ2:bool=false;
 const KQ3:bool=false;
 const KQ4:bool=false;
-const LL1:bool=false;
+const LL1:bool=true;
 const SQ1:bool=false;
 const SQ2:bool=false;
 const SQ2_F:bool=false;

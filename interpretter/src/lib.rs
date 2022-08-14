@@ -74,6 +74,7 @@ pub enum SpriteCycle {
 #[derive(Debug)] // TODO revisit copy
 pub struct Sprite {
     active:bool,        // object is processed
+    request_shuffle:bool,   // object requires a shuffle
     added_to_pic:bool,  // object was added via add_to_pic command
     moved:bool,         // object moved last tick
     frozen:bool,        // object ignores updates (animation/etc)
@@ -127,6 +128,7 @@ impl Sprite {
     pub fn new() -> Sprite {
         Sprite { 
             active: false, 
+            request_shuffle: false,
             added_to_pic: false,
             moved: false,
             frozen: false,
@@ -435,14 +437,17 @@ impl Sprite {
             self.cloop=0;
         }
         self.last_cel = (resources.views[&(self.view as usize)].get_loops()[self.cloop as usize].get_cels().len()-1) as u8;
-        if (self.cel>self.last_cel) {
+        if self.cel>self.last_cel {
             self.cel=0;
         }
     }
 
     pub fn set_loop(&mut self,n:u8, resources:&GameResources) {
         self.cloop = n;
-        self.last_cel = (resources.views[&(self.view as usize)].get_loops()[n as usize].get_cels().len()-1) as u8;
+        if resources.views[&(self.view as usize)].get_loops().len()<=(self.cloop as usize) {
+            self.cloop=0;
+        }
+        self.last_cel = (resources.views[&(self.view as usize)].get_loops()[self.cloop as usize].get_cels().len()-1) as u8;
         if self.cel>self.last_cel {
             self.cel=0;
         }
@@ -460,6 +465,10 @@ impl Sprite {
         if self.get_y() < self.height {
             self.set_y(self.height);
         }
+    }
+
+    pub fn set_delayed_shuffle(&mut self) {
+        self.request_shuffle=true;
     }
 
     pub fn set_fixed_loop(&mut self,b:bool) {
@@ -1068,6 +1077,15 @@ impl LogicState {
             self.final_buffer = [0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
         } else {
             self.final_buffer = self.post_sprites;
+
+            if self.status_visible {
+                // Render Status Line (just a white bar for now)
+                for y in 0..8 {
+                    for x in 0..SCREEN_WIDTH_USIZE {
+                        self.final_buffer[x+(y+(self.status_line as usize)*8)*SCREEN_WIDTH_USIZE]=15;
+                    }
+                }
+            }
         }
 
         // Now combine the text buffer
@@ -1380,6 +1398,7 @@ impl Interpretter {
             //  recaclc dir of movement
             update_sprites(&self.resources,mutable_state);
             update_anims(&self.resources,mutable_state);
+            shuffle_delayed(&self.resources,mutable_state);
 
             // If score has changed(var(3)) or sound has turned off/on (flag(9)), update status line
             //show VAR_CURRENT_SCORE out of VAR_MAXIMUM_SCORE .... SOUND ON/OFF
@@ -1522,6 +1541,7 @@ impl Interpretter {
             obj.set_step_size(1);
             obj.set_step_time(1);
             obj.set_cycle_time(1);
+            obj.request_shuffle=false;
 
         }
         //destroy all resources
@@ -1745,7 +1765,9 @@ impl Interpretter {
                 }
                 for y in start..=end {
                     for x in 0usize..SCREEN_WIDTH_USIZE {
-                        state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
+                        if y+(state.play_top as usize)*8 < SCREEN_HEIGHT_USIZE {
+                            state.back_buffer[x+(y+(state.play_top as usize)*8)*SCREEN_WIDTH_USIZE] = col;
+                        }
                         state.text_buffer[x+y*SCREEN_WIDTH_USIZE] = 255;
                     }
                 }
@@ -1821,8 +1843,8 @@ impl Interpretter {
             ActionOperation::StatusLineOn(()) => state.set_status_visible(true),
             ActionOperation::AcceptInput(()) => state.set_input(true),
             ActionOperation::StartCycling((obj,)) => state.mut_object(obj).set_cycling(true),
-            ActionOperation::ObjectOnWater((obj,)) => { state.mut_object(obj).set_restrict_to_water(); shuffle(state, resources, obj); },
-            ActionOperation::ObjectOnLand((obj,)) => { state.mut_object(obj).set_restrict_to_land(); shuffle(state, resources, obj); },
+            ActionOperation::ObjectOnWater((obj,)) => { state.mut_object(obj).set_restrict_to_water(); state.mut_object(obj).set_delayed_shuffle(); },
+            ActionOperation::ObjectOnLand((obj,)) => { state.mut_object(obj).set_restrict_to_land(); state.mut_object(obj).set_delayed_shuffle(); },
             ActionOperation::Wander((obj,)) => {
                 let dist=state.rng.gen_range(6u8..=50u8);
                 state.mut_object(obj).set_wander(dist);
@@ -1998,7 +2020,7 @@ impl Interpretter {
                 }
                 for x in c1..=c2 {
                     for y in r1..=r2 {
-                        state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
+                        state.back_buffer[x+(y+(state.play_top as usize)*8)*SCREEN_WIDTH_USIZE] = col;
                         state.text_buffer[x+y*SCREEN_WIDTH_USIZE] = 255;
                     }
                 }
@@ -2416,7 +2438,7 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
             },
         }
 
-        if state.object(obj_num).get_direction()!=0 {
+        if state.object(obj_num).get_direction()!=0 && state.object(obj_num).motion {
             // Now perform motion based on direction
             // Collision/rules check here I think
             let (moved, nx,ny,water,signal) = update_move(resources,state,obj_num);
@@ -2457,9 +2479,6 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
 
     let obj=state.object(&obj_num);
 
-    if !obj.motion {
-        return (false,FP16::ZERO,FP16::ZERO,false,false);
-    }
     let (dx,dy) = get_delta_fp32_from_direction(obj.get_direction());
     let x=FP32::from(obj.get_x_fp16());
     let y=FP32::from(obj.get_y_fp16());
@@ -2480,7 +2499,7 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
     let cell = &cels[c];
 
     let w = cell.get_width() as usize;
-    let _h = cell.get_height() as usize;
+    let h = cell.get_height() as usize;
     let tx:usize = nx.to_num();
     let ty:usize = ny.to_num();
     
@@ -2516,34 +2535,38 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
     let mut blocked=false;
     let mut water=true;
     let mut signal=false;
-    let slice = pri_slice_for_baseline(state, tx, ty, w);
-    for pri in slice {
-        let pri=*pri;
-        water&=pri==3;
-        if pri != 3 && obj.is_restricted_to_water() {
-            blocked=true;
-        }
-        if obj.priority != 15 && pri == 0 {
-            blocked=true;
-        }
-        if obj.priority != 15 && pri == 1 {
-            if obj.is_restricted_by_blocks() {
-                blocked=true;
-            }
-        }
-        if pri == 2 {
-            signal=true;
-        }
-    }
-    if water && obj.is_restricted_to_land() {
-        blocked=true;
-    }
+    get_priority_status(state, tx, ty, w, &mut water, obj, &mut blocked, &mut signal);
 
     if blocked {
         return (false,nx,ny,water,signal);
     }
     (true, nx, ny, water, signal)
 
+}
+
+fn get_priority_status(state: &LogicState, tx: usize, ty: usize, w: usize, water: &mut bool, obj: &Sprite, blocked: &mut bool, signal: &mut bool) {
+    let slice = pri_slice_for_baseline(state, tx, ty, w);
+    for pri in slice {
+        let pri=*pri;
+        *water&=pri==3;
+        if pri != 3 && obj.is_restricted_to_water() {
+            *blocked=true;
+        }
+        if obj.priority != 15 && pri == 0 {
+            *blocked=true;
+        }
+        if obj.priority != 15 && pri == 1 {
+            if obj.is_restricted_by_blocks() {
+                *blocked=true;
+            }
+        }
+        if pri == 2 {
+            *signal=true;
+        }
+    }
+    if *water && obj.is_restricted_to_land() {
+        *blocked=true;
+    }
 }
 
 pub fn fetch_priority_for_pixel(state:&LogicState,x:usize,y:usize) -> u8 {
@@ -2630,7 +2653,6 @@ pub fn get_cells_clamped<'a>(resources:&'a GameResources,obj:&Sprite) -> &'a Vec
     cloop.get_cels()
 }
 
-
 pub fn update_anims(resources:&GameResources,state:&mut LogicState) {
     for num in state.active_objects_indices() {
         let obj_num = TypeObject::from(num as u8);
@@ -2713,11 +2735,21 @@ pub fn update_anims(resources:&GameResources,state:&mut LogicState) {
 
 }
 
+pub fn shuffle_delayed(resources:&GameResources,state:&mut LogicState) {
+    for num in state.active_objects_indices_sorted_pri_y() {
+        let obj_num = TypeObject::from(num as u8);
+        if state.object(&obj_num).request_shuffle {
+            shuffle(state,resources,&obj_num);
+        }
+    }
+}
+
 pub fn render_sprites(resources:&GameResources,state:&mut LogicState, disable_background:bool) {
     state.post_sprites = if disable_background {[0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]} else {state.back_buffer};
 
     for num in state.active_objects_indices_sorted_pri_y() {
         let obj_num = TypeObject::from(num as u8);
+
         if state.object(&obj_num).visible {
             let mut c = usize::from(state.object(&obj_num).get_cel());
             let cels = get_cells_clamped(resources, state.object(&obj_num));
@@ -2820,6 +2852,7 @@ fn render_view_to_window(cell: &view::ViewCel, state: &mut LogicState, x:usize, 
 }
 
 fn render_sprite(obj_num:&TypeObject, cell: &view::ViewCel, state: &mut LogicState) {
+
     let x = usize::from(state.object(obj_num).get_x());
     let y = usize::from(state.object(obj_num).get_y());
     let mut h = usize::from(cell.get_height());
@@ -2849,5 +2882,48 @@ fn render_sprite(obj_num:&TypeObject, cell: &view::ViewCel, state: &mut LogicSta
 }
 
 fn shuffle(state:&mut LogicState,resources:&GameResources,obj:&TypeObject) {
-    println!("TO IMPLEMENT - SHUFFLE");
+
+    let mut shuffle_state=0;
+    let mut cnt=1;
+    let mut size=1;
+    {
+        state.mut_object(obj).request_shuffle=false;
+        let s = state.object(obj);
+        let mut tx = s.get_x() as usize;
+        let mut ty = s.get_y() as usize;
+        let w = s.get_width() as usize;
+
+        loop {
+            let mut blocked=false;
+            let mut water=true;
+            let mut signal=false;
+
+            // todo check position is on screen
+            // todo check collisions with objects
+
+            get_priority_status(state, tx, ty, w, &mut water, state.object(obj), &mut blocked, &mut signal);
+            let mut position_safe=true;
+            if s.restrict_to_water && !water {
+                position_safe=false;
+            } else if s.restrict_to_land && water {
+                position_safe=false;
+            } else if blocked {
+                position_safe=false;
+            }
+
+            if position_safe {
+                break;
+            }
+
+            match shuffle_state {
+                0 => { tx-=1; cnt-=1; if cnt==0 { shuffle_state=1; cnt=size; } },
+                1 => { ty+=1; cnt-=1; if cnt==0 { shuffle_state=2; size+=1; cnt=size; } },
+                2 => { tx+=1; cnt-=1; if cnt==0 { shuffle_state=3; cnt=size; } },
+                3 => { ty-=1; cnt-=1; if cnt==0 { shuffle_state=0; size+=1; cnt=size; } },
+                _ => panic!("Inconcievable"),
+            }
+        }
+        state.mut_object(obj).set_x(tx as u8);
+        state.mut_object(obj).set_y(ty as u8);
+    }
 }
