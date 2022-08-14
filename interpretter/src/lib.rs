@@ -401,8 +401,11 @@ impl Sprite {
         }
     }
 
-    pub fn set_loop(&mut self,n:u8) {
+    pub fn set_loop(&mut self,n:u8, resources:&GameResources) {
         self.cloop = n;
+        if resources.views[&(self.view as usize)].get_loops()[n as usize].get_cels().len()<=(self.cel as usize) {
+            self.cel=0;
+        }
     }
     
     pub fn set_cel(&mut self,n:u8) {
@@ -828,10 +831,11 @@ impl LogicState {
     pub fn get_random(&mut self,start:&TypeNum,end:&TypeNum) -> u8 {
         let s=self.get_num(start);
         let e=self.get_num(end);
-        if s==e {
-            return s;
+        if s>=e {
+            self.rng.gen_range(0u8..=255u8)
+        } else {
+            self.rng.gen_range(s..=e)
         }
-        self.rng.gen_range(self.get_num(start)..self.get_num(end))
     }
 
     pub fn set_logic_start(&mut self,pos:&LogicExecutionPosition) {
@@ -1379,7 +1383,7 @@ impl Interpretter {
             ConditionOperation::GreaterN((var,num)) => state.get_var(var) > state.get_num(num),
             ConditionOperation::GreaterV((var1,var2)) => state.get_var(var1) > state.get_var(var2), 
             ConditionOperation::IsSet((flag,)) => state.get_flag(flag),
-            ConditionOperation::IsSetV(_) => todo!(),
+            ConditionOperation::IsSetV((var,)) => state.get_flag(&TypeFlag::from(state.get_var(var))),
             ConditionOperation::Has((item,)) => state.get_item_room(item)==255,
             ConditionOperation::ObjInRoom((item,var)) => { let n=state.get_var(var); state.get_item_room(item)==n },
             ConditionOperation::Posn((obj,num1,num2,num3,num4)) => is_left_edge_in_box(resources,state,obj,num1,num2,num3,num4),
@@ -1640,7 +1644,7 @@ impl Interpretter {
             ActionOperation::SetHorizon((num,)) => state.set_horizon(state.get_num(num)),
             ActionOperation::Reposition((obj,var1,var2)) => {let dx=state.get_var(var1); let dy=state.get_var(var2); state.mut_object(obj).adjust_x_via_delta(dx); state.mut_object(obj).adjust_y_via_delta(dy); shuffle(state,resources,obj); },
             ActionOperation::SetPriority((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_priority(n); },
-            ActionOperation::SetLoop((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_loop(n); },
+            ActionOperation::SetLoop((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_loop(n,resources); },
             ActionOperation::SetCel((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_cel(n); },
             ActionOperation::DrawPic((var,)) => { let n = state.get_var(var); resources.pictures[&usize::from(n)].render_to(&mut state.picture_buffer,&mut state.priority_buffer).unwrap(); erase_all_add_to_pic(state); },
             ActionOperation::ShowPic(()) => {
@@ -1880,7 +1884,7 @@ impl Interpretter {
             ActionOperation::UnanimateAll(()) => state.unanimate_all(),
             ActionOperation::GetRoomV((item,var)) => { let item = &TypeItem::from(state.get_var(item));let loc = state.get_item_room(item); state.set_var(var,loc); }
             ActionOperation::GetDir((obj,var)) => { let dir = state.object(obj).get_direction(); state.set_var(var,dir); },
-            ActionOperation::SetLoopV((obj,var)) => { let n=state.get_var(var); state.mut_object(obj).set_loop(n); },
+            ActionOperation::SetLoopV((obj,var)) => { let n=state.get_var(var); state.mut_object(obj).set_loop(n,resources); },
             ActionOperation::AddToPicV((var1,var2,var3,var4,var5,var6,var7)) => /* TODO RAGI */ {
                 let view=state.get_var(var1);
                 let cloop=state.get_var(var2);
@@ -2562,8 +2566,8 @@ pub fn update_anims(resources:&GameResources,state:&mut LogicState) {
                         let direction = state.object(&obj_num).get_direction();
                         match direction {
                             0..=1 | 5 => {}, // Do nothing
-                            2..=4 => state.mut_object(&obj_num).set_loop(0),
-                            6..=8 => state.mut_object(&obj_num).set_loop(1),
+                            2..=4 => state.mut_object(&obj_num).set_loop(0,resources),
+                            6..=8 => state.mut_object(&obj_num).set_loop(1,resources),
                             _ => panic!("direction not valid range for auto loop {}",direction),
                         }
                     },
@@ -2571,10 +2575,10 @@ pub fn update_anims(resources:&GameResources,state:&mut LogicState) {
                         let direction = state.object(&obj_num).get_direction();
                         match direction {
                             0 => {}, // Do nothing
-                            1 => state.mut_object(&obj_num).set_loop(3),
-                            2..=4 => state.mut_object(&obj_num).set_loop(0),
-                            5 => state.mut_object(&obj_num).set_loop(2),
-                            6..=8 => state.mut_object(&obj_num).set_loop(1),
+                            1 => state.mut_object(&obj_num).set_loop(3,resources),
+                            2..=4 => state.mut_object(&obj_num).set_loop(0,resources),
+                            5 => state.mut_object(&obj_num).set_loop(2,resources),
+                            6..=8 => state.mut_object(&obj_num).set_loop(1,resources),
                             _ => panic!("direction not valid range for auto loop {}",direction),
                         }
                     },
@@ -2679,7 +2683,7 @@ fn add_view_to_pic(resources: &GameResources, state:&mut LogicState, view:u8, cl
     state.mut_object(&obj_num).set_active(true);
     state.mut_object(&obj_num).added_to_pic=true;
     state.mut_object(&obj_num).set_view(view,resources);
-    state.mut_object(&obj_num).set_loop(cloop);
+    state.mut_object(&obj_num).set_loop(cloop,resources);
     state.mut_object(&obj_num).set_cel(cel);
     state.mut_object(&obj_num).set_visible(true);
     state.mut_object(&obj_num).set_frozen(true);
