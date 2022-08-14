@@ -13,14 +13,14 @@ use imgui::*;
 
 
 const XMAS:bool=false;
-const DP1:bool=false;
+const DP1:bool=true;
 const KQ1:bool=false;
 const KQ2:bool=false;
 const KQ3:bool=false;
 const KQ4:bool=false;
 const LL1:bool=false;
 const SQ1:bool=false;
-const SQ2:bool=true;
+const SQ2:bool=false;
 const SQ2_F:bool=false;
 const GR:bool =false;
 const BC:bool =false;
@@ -32,7 +32,7 @@ fn main() -> Result<(), String> {
 
     if XMAS {
         interpretter=Interpretter::new("../images/AGI-XMAS/","2.272").unwrap();
-        //interpretter.set_breakpoint(35,1,true);
+        //interpretter.set_breakpoint(4,44,true);
     } else if DP1 {
         interpretter=Interpretter::new("../images/agi_demo_pack_1/","2.915").unwrap();
         interpretter.set_breakpoint(161,1,true);
@@ -63,8 +63,7 @@ fn main() -> Result<(), String> {
         interpretter.set_breakpoint(5,54,false);
     } else if SQ2 {
         interpretter=Interpretter::new("../images/Space Quest II- Chapter II - Vohaul's Revenge v2.0C (1987)(Sierra On-Line, Inc.) [Adventure]/","2.917").unwrap();
-        interpretter.set_breakpoint(2,167,true);
-        interpretter.set_breakpoint(3,136,true);
+        interpretter.set_breakpoint(2,147,true);
     } else if SQ2_F {
         interpretter=Interpretter::new("../images/Space Quest II V2.0F/","2.936").unwrap();
         //interpretter.set_breakpoint(6,126,true);
@@ -115,6 +114,7 @@ fn main() -> Result<(), String> {
     let mut debug_texture_index:usize=0;
     let mut resume=false;
     let mut step=false;
+    let mut pause=false;
     'running: loop {
         unsafe {
             gl.clear_color(0.0,0.3,0.3,1.0);
@@ -143,9 +143,10 @@ fn main() -> Result<(), String> {
 
         // The rest of the game loop goes here...
         let mut just_paused=false;
-        if !interpretter.is_paused() || resume || step {
+        if !pause {
             interpretter.run(resume,step);
-            just_paused=interpretter.is_paused();
+            just_paused=interpretter.is_paused() || step;
+            pause=just_paused;
         }
 
         resume=false;
@@ -162,6 +163,22 @@ fn main() -> Result<(), String> {
             Image::new(textures_ui.get_generated_texture(0),[640.0,400.0]).build(&ui);
         });
 
+        Window::new("BUTTONS").build(&ui, || {
+            if pause {
+                resume = ui.button("Resume");
+                step = ui.button("Step");
+            } else {
+                if ui.button("Pause") {
+                    pause=true;
+                    just_paused=true;
+                    //insert a temporary breakpoint on the current room
+                    interpretter.breakpoints.insert(LogicExecutionPosition::new(interpretter.state.get_var(&VAR_CURRENT_ROOM).into(),0),true);
+                    //step=true;
+                }
+            }
+        });
+
+        pause = pause && !(resume||step);
         Window::new("OBJECTS").build(&ui, || {
             for index in interpretter.state.active_objects_indices_sorted_pri_y() {
                 let obj_num = &TypeObject::from(index as u8);
@@ -231,7 +248,7 @@ fn main() -> Result<(), String> {
         });
 
         Window::new("LOGIC").build(&ui, || {
-            if (live_debug_view || interpretter.is_paused()) && !interpretter.stack.is_empty() {
+            if (live_debug_view || pause) && !interpretter.stack.is_empty() {
                 let top_of_stack = &interpretter.stack[interpretter.stack.len()-1];
                 let file = top_of_stack.get_logic();
                 let logic = interpretter.resources.logic.get(&file);
@@ -263,7 +280,7 @@ fn main() -> Result<(), String> {
         });
 
         Window::new("FLAGS").build(&ui, || {
-            if live_debug_view || interpretter.is_paused() {
+            if live_debug_view || pause {
                 for (index,f) in interpretter.state.get_flags().enumerate() {
                     if f {
                         ui.text(format!("{:3} : {}", index, f));
@@ -273,7 +290,7 @@ fn main() -> Result<(), String> {
         });
 
         Window::new("VARS").build(&ui, || {
-            if live_debug_view || interpretter.is_paused() {
+            if live_debug_view || pause {
                 for (index,v) in interpretter.state.get_vars().enumerate() {
                     if v!=0 {
                         ui.text(format!("{:3} : {}", index, v));
@@ -283,7 +300,7 @@ fn main() -> Result<(), String> {
         });
         
         Window::new("STRINGS").build(&ui, || {
-            if live_debug_view || interpretter.is_paused() {
+            if live_debug_view || pause {
                 for (index,s) in interpretter.state.get_strings().enumerate() {
                     if !s.is_empty() {
                         ui.text(format!("{:3} : {}", index, s));
@@ -294,24 +311,13 @@ fn main() -> Result<(), String> {
 
 
         Window::new("STACK").build(&ui, || {
-            if live_debug_view || interpretter.is_paused() {
+            if live_debug_view || pause {
                 for a in (&interpretter.stack).into_iter().rev() {
                     ui.text(format!("Logic : {} | PC : {}", a.get_logic(),a.get_pc()));
                 }
             }
         });
 
-        Window::new("BUTTONS").build(&ui, || {
-            if interpretter.is_paused() {
-                resume = ui.button("Resume");
-                step = ui.button("Step");
-            } else {
-                if ui.button("Pause") {
-                    //insert a temporary breakpoint on the current room
-                    interpretter.breakpoints.insert(LogicExecutionPosition::new(interpretter.state.get_var(&VAR_CURRENT_ROOM).into(),0),true);
-                }
-            }
-        });
 
         imgui_sdl2.prepare_render(&ui,&window);
         let draw_data = ui.render();

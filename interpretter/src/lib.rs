@@ -92,9 +92,14 @@ pub struct Sprite {
     view:u8,
     cloop:u8,
     cel:u8,
+    last_cel:u8,
+    width:u8,
+    height:u8,
     render_view:u8, // make these &view,&loop,&cel to save looking them all the time
     render_cloop:u8,
     render_cel:u8,
+    render_width:u8,
+    render_height:u8,
     x:FP16,           // bottom left corner
     y:FP16,
     priority:u8,
@@ -140,9 +145,14 @@ impl Sprite {
             view: 0, 
             cloop: 0,
             cel: 0,
+            last_cel: 0,
+            width: 0,
+            height: 0,
             render_view: 0,
             render_cloop: 0,
             render_cel: 0,
+            render_width: 0,
+            render_height: 0,
             x:FP16::from_num(0), 
             y:FP16::from_num(0),
             priority:0,
@@ -183,6 +193,14 @@ impl Sprite {
 
     pub fn get_cel(&self) -> u8 {
         self.render_cel
+    }
+
+    pub fn get_width(&self) -> u8 {
+        self.render_width
+    }
+    
+    pub fn get_height(&self) -> u8 {
+        self.render_width
     }
 
     pub fn get_visible(&self) -> bool {
@@ -228,6 +246,10 @@ impl Sprite {
     pub fn get_end_y(&self) -> FP16 {
         self.ey
     }
+
+    pub fn get_last_cel(&self) -> u8 {
+        self.last_cel
+    }
     
     pub fn get_motion_kind(&self) -> &SpriteMotion {
         &self.motion_kind
@@ -256,21 +278,39 @@ impl Sprite {
         }
     }
 
-    pub fn distance(&self,other:&Sprite) -> u8 {
+    pub fn distance_self(&self) -> u8 {
+        if !self.get_visible() {
+            return 255;
+        }
+        let x1:i16=self.get_x().into();
+        let x2:i16=self.get_end_x().to_num();
+        let y1:i16=self.get_y().into();
+        let y2:i16=self.get_end_y().to_num();
+        
+        let d = (y1-y2).abs() + (x1-x2).abs();
+        if d > 254 {
+            254
+        } else {
+            d as u8
+        }
+    }
+
+    pub fn distance(&self,other:&Sprite,w1:i16,w2:i16) -> u8 {
         if !self.get_visible() || !other.get_visible() {
             return 255;
         }
-
-        println!("TODO - Distance calculation should be Abs(y1-y2) + Abs((x1+w1/2) - (x2+w2/2)");   // ie center of baseline to center of baseline
 
         let x1:i16=self.get_x().into();
         let x2:i16=other.get_x().into();
         let y1:i16=self.get_y().into();
         let y2:i16=other.get_y().into();
         
-        let d = (x1-x2).abs().wrapping_add((y1-y2).abs());
-
-        d as u8
+        let d = (y1-y2).abs() + ((x1+w1/2)-(x2+w2/2)).abs();
+        if d > 254 {
+            254
+        } else {
+            d as u8
+        }
     }
 
     pub fn should_step(&mut self) -> bool {
@@ -309,20 +349,12 @@ impl Sprite {
     
     pub fn set_frozen(&mut self,b:bool) {
         self.frozen=b;
-        if b {
-            self.render_view=self.view;
-            self.render_cloop=self.cloop;
-            self.render_cel=self.cel;
-        }
+        self.force_update();
     }
 
     pub fn set_visible(&mut self,b:bool) {
         self.visible=b;
-        if b {
-            self.render_view=self.view;
-            self.render_cloop=self.cloop;
-            self.render_cel=self.cel;
-        }
+        self.force_update();
     }
 
     pub fn set_observing(&mut self,b:bool) {
@@ -349,13 +381,17 @@ impl Sprite {
         self.direction=d;
     }
 
+    pub fn force_update(&mut self) {
+        self.render_view=self.view;
+        self.render_cloop=self.cloop;
+        self.render_cel=self.cel;
+        self.render_width=self.width;
+        self.render_height=self.height;
+    }
+
     pub fn set_cycling(&mut self,b:bool) {
         self.cycle=b;
-        if b {
-            self.render_view=self.view;
-            self.render_cloop=self.cloop;
-            self.render_cel=self.cel;
-        }
+        self.force_update();
     }
 
     pub fn set_step_time(&mut self,n:u8) {
@@ -393,24 +429,37 @@ impl Sprite {
         self.priority = 0;
     }
    
-    // Todo frozen should mean view/loop/cel is not changed if object on screen, will need a shadow of these vars to do that (or cache the cell in the sprite, and direct render that - better)
     pub fn set_view(&mut self, view:u8, resources:&GameResources) {
         self.view = view;
         if resources.views[&(view as usize)].get_loops().len()<=(self.cloop as usize) {
             self.cloop=0;
         }
+        self.last_cel = (resources.views[&(self.view as usize)].get_loops()[self.cloop as usize].get_cels().len()-1) as u8;
+        if (self.cel>self.last_cel) {
+            self.cel=0;
+        }
     }
 
     pub fn set_loop(&mut self,n:u8, resources:&GameResources) {
         self.cloop = n;
-        if resources.views[&(self.view as usize)].get_loops()[n as usize].get_cels().len()<=(self.cel as usize) {
+        self.last_cel = (resources.views[&(self.view as usize)].get_loops()[n as usize].get_cels().len()-1) as u8;
+        if self.cel>self.last_cel {
             self.cel=0;
         }
     }
     
-    pub fn set_cel(&mut self,n:u8) {
+    pub fn set_cel(&mut self,n:u8,resources:&GameResources) {
         self.cel = n;
-        println!("TODO - if object no longer fits, reposition along required edge");
+        self.width = resources.views[&(self.view as usize)].get_loops()[self.cloop as usize].get_cels()[n as usize].get_width();
+        self.height = resources.views[&(self.view as usize)].get_loops()[self.cloop as usize].get_cels()[n as usize].get_height();
+
+        // Reposition in bounds along edge
+        if self.get_x() + self.width > PIC_WIDTH_U8 {
+            self.set_x(PIC_WIDTH_U8-self.width-1);
+        }
+        if self.get_y() < self.height {
+            self.set_y(self.height);
+        }
     }
 
     pub fn set_fixed_loop(&mut self,b:bool) {
@@ -453,6 +502,7 @@ impl Sprite {
     pub fn set_move(&mut self,x:u8,y:u8,s:u8,f:&TypeFlag) {
         self.set_enable_motion(true);   // to confirm
         self.set_frozen(false);         // to confirm
+        self.set_moved(true);
         self.motion_kind=SpriteMotion::MoveObj;
         self.ex=FP16::from_num(x);
         self.ey=FP16::from_num(y);
@@ -466,6 +516,7 @@ impl Sprite {
     pub fn set_follow(&mut self,s:u8,f:&TypeFlag) {
         self.set_enable_motion(true);   // to confirm
         self.set_frozen(false);         // to confirm
+        self.set_moved(true);
         self.motion_kind=SpriteMotion::FollowEgo;
         self.move_flag= *f;
         self.follow_distance = if s==0 { self.get_step_size().to_num() } else {s};
@@ -507,16 +558,19 @@ impl Sprite {
     }
 
     pub fn set_wander(&mut self,dist:u8) {
+        self.set_moved(true);
         self.motion_kind=SpriteMotion::Wander;
         self.wander_distance=FP16::from_num(dist);
         self.set_enable_motion(true);   // to confirm
     }
 
     pub fn set_normal_motion(&mut self) {
+        self.set_moved(true);
         self.motion_kind=SpriteMotion::Normal;
     }
 
     pub fn set_enable_motion(&mut self,b:bool) {
+        self.set_moved(true);
         self.motion=b;
     }
 }
@@ -637,6 +691,10 @@ pub struct LogicState {
     ink:u8,     // colours for display/get_string/get_num
     paper:u8,
 
+    play_top: u8,
+    input_line: u8,
+    status_line: u8,
+
     windows:[TextWindow;2], // Holds the co-ordinates of the message window last drawn (and item from show.obj)
     displayed:String,
 
@@ -687,6 +745,9 @@ impl LogicState {
             displayed: String::from(""),
             ink:15,
             paper:0,
+            play_top: 0,
+            input_line: 21,
+            status_line: 23,
             key_len:0,
             key_buffer:[AgiKeyCodes::Enter;256],
             controllers:HashMap::new(),
@@ -864,6 +925,12 @@ impl LogicState {
         } else {
             self.prompt=' ';
         }
+    }
+
+    pub fn set_configure_screen(&mut self,play_top:u8,input_line:u8,status_line:u8) {
+        self.play_top = play_top;
+        self.input_line = input_line;
+        self.status_line = status_line;
     }
 
     pub fn set_ink(&mut self,ink:u8) {
@@ -1269,7 +1336,7 @@ impl Interpretter {
         }
 
         if mutable_state.is_input_enabled() {
-            let (done,new_string) = command_input(mutable_state, self.command_input_string.clone(),20,&String::from(">"),&self.resources,0,22,15,0,false);    // not sure if attributes are affected for this
+            let (done,new_string) = command_input(mutable_state, self.command_input_string.clone(),20,&String::from(">"),&self.resources,0,mutable_state.input_line,15,0,false);    // not sure if attributes are affected for this
             self.command_input_string = new_string;
             if done && self.command_input_string.len()>0 {
                 // parse and clear input string
@@ -1447,6 +1514,9 @@ impl Interpretter {
             obj.set_normal_motion();
             obj.set_direction(0);
             obj.set_cycling(false);
+            obj.set_ignore_barriers(false);
+            obj.set_ignore_horizon(false);
+            obj.set_observing(true);
             obj.set_priority_auto();
             //obj.reset();//  (may not be needed)
             obj.set_step_size(1);
@@ -1562,14 +1632,12 @@ impl Interpretter {
             ActionOperation::Sound((_num,flag)) => /* TODO RAGI  - for now, just pretend sound finished*/ {/*println!("TODO : Sound@{}",pc); */state.set_flag(flag,true);},
             ActionOperation::StopSound(()) => /* TODO RAGI - for now, since we complete sounds straight away, does nothing */ {/*println!("TODO : StopSound@{}",pc);*/},
             ActionOperation::SetGameID((m,)) => /* TODO RAGI - if needed */{let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetGameID@{} {:?}",pc,m);},
-            ActionOperation::ConfigureScreen((a,b,c)) => /* TODO RAGI */ { println!("TODO : ConfigureScreen@{} {:?},{:?},{:?}",pc,a,b,c);},
             ActionOperation::SetMenu((m,)) => /* TODO RAGI */ { let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetMenu@{} {}",pc,m); },
             ActionOperation::SetMenuMember((m,c)) => /* TODO RAGI */{ let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetMenuMember@{} {} {}",pc,m,state.get_controller(c)); },
             ActionOperation::SubmitMenu(()) => /* TODO RAGI */ { println!("TODO : SubmitMenu@{}",pc)},
             ActionOperation::TraceInfo((num1,num2,num3)) => /* TODO RAGI */ { println!("TODO : TraceInfo@{} {} {} {}",pc,state.get_num(num1),state.get_num(num2),state.get_num(num3)); }
             ActionOperation::DisableMember((c,)) => /* TODO RAGI */ println!("TODO : DisableMember@{} {}",pc, state.get_controller(c)),
             ActionOperation::CancelLine(()) => /* TODO RAGI */ println!("TODO : CancelLine@{}",pc),
-            ActionOperation::ForceUpdate((o,)) => /* TODO RAGI */ println!("TODO : ForceUpdate@{} {:?}",pc,o),
             ActionOperation::ShakeScreen((num,)) => /* TODO RAGI */ println!("TODO : ShakeScreen@{} {:?}",pc,num),
             ActionOperation::PrintAtV0((m,x,y,)) => /* TODO RAGI */ { let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : PrintAtV0@{} {} {},{}",pc,m,state.get_num(x),state.get_num(y)); },
             ActionOperation::Block((a,b,c,d)) => /* TODO RAGI */ { println!("TODO : Block@{} {},{},{},{}",pc,state.get_num(a),state.get_num(b),state.get_num(c),state.get_num(d)); },
@@ -1645,13 +1713,13 @@ impl Interpretter {
             ActionOperation::Reposition((obj,var1,var2)) => {let dx=state.get_var(var1); let dy=state.get_var(var2); state.mut_object(obj).adjust_x_via_delta(dx); state.mut_object(obj).adjust_y_via_delta(dy); shuffle(state,resources,obj); },
             ActionOperation::SetPriority((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_priority(n); },
             ActionOperation::SetLoop((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_loop(n,resources); },
-            ActionOperation::SetCel((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_cel(n); },
+            ActionOperation::SetCel((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_cel(n,resources); },
             ActionOperation::DrawPic((var,)) => { let n = state.get_var(var); resources.pictures[&usize::from(n)].render_to(&mut state.picture_buffer,&mut state.priority_buffer).unwrap(); erase_all_add_to_pic(state); },
             ActionOperation::ShowPic(()) => {
                 let dpic = double_pic_width(state.picture());
                 for y in 0usize..PIC_HEIGHT_USIZE {
                     for x in 0usize..PIC_WIDTH_USIZE*2 {
-                        state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = dpic[x+y*SCREEN_WIDTH_USIZE];
+                        state.back_buffer[x+(y+(state.play_top as usize)*8)*SCREEN_WIDTH_USIZE] = dpic[x+y*SCREEN_WIDTH_USIZE];
                     }
                 }
                 // Clear textbuffer on showpic
@@ -1721,7 +1789,7 @@ impl Interpretter {
                 // This actually halts interpretter until the input string is entered
                 let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); 
                 let x=0;
-                let y=22;
+                let y=state.input_line;
                 let max_length = 5;
                 let input = state.get_num_string().clone();
                 let (done,new_string) = command_input(state, input, max_length, &m, resources, x, y,state.get_ink(),state.get_paper(),true);
@@ -1763,11 +1831,15 @@ impl Interpretter {
                 }
             }
             ActionOperation::StartUpdate((obj,)) => state.mut_object(obj).set_frozen(false),
-            ActionOperation::Distance((obj1,obj2,var)) => state.set_var(var,state.object(obj1).distance(state.object(obj2))),
+            ActionOperation::Distance((obj1,obj2,var)) => {
+                let w1:i16 = state.object(obj1).get_width().into();
+                let w2:i16 = state.object(obj2).get_width().into();
+                state.set_var(var,state.object(obj1).distance(state.object(obj2),w1,w2));
+            },
             ActionOperation::ReleasePriority((obj,)) => { state.mut_object(obj).set_priority_auto(); },
             ActionOperation::PlayerControl(()) => state.set_player_control(),
-            ActionOperation::LastCel((obj,var)) => { let cels = get_cells_clamped(resources,state.object(obj)); state.set_var(var,(cels.len()-1) as u8); },
-            ActionOperation::SetCelV((obj,var)) => { let n=state.get_var(var); state.mut_object(obj).set_cel(n); },
+            ActionOperation::LastCel((obj,var)) => { let cel =state.object(obj).get_last_cel(); state.set_var(var,cel); },
+            ActionOperation::SetCelV((obj,var)) => { let n=state.get_var(var); state.mut_object(obj).set_cel(n,resources); },
             ActionOperation::StopMotion((obj,)) => {
                 state.mut_object(obj).set_enable_motion(false);
                 if *obj==OBJECT_EGO {
@@ -1933,6 +2005,13 @@ impl Interpretter {
             },
             ActionOperation::ObjectOnAnything((obj,)) => state.mut_object(obj).set_on_anything(),
             ActionOperation::MulN((var,num)) => state.set_var(var,state.get_var(var).wrapping_mul(state.get_num(num))),
+            ActionOperation::ForceUpdate((o,)) => state.mut_object(o).force_update(),
+            ActionOperation::ConfigureScreen((a,b,c)) => {
+                let play_top = state.get_num(a);
+                let input_line = state.get_num(b);
+                let status_line = state.get_num(c);
+                state.set_configure_screen(play_top, input_line, status_line);
+            },
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
@@ -2278,8 +2357,11 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
                 let ey=FP32::from(state.object(obj_num).get_end_y());
                 let dx=ex.int()-x.int();
                 let dy=ey.int()-y.int();
-                let s = FP32::from(state.object(obj_num).get_step_size());
-                let direction = if dx.abs() <= s && dy.abs() <= s {
+                let s = state.object(obj_num).get_step_size().to_num::<u8>();
+                let d = state.object(obj_num).distance_self();
+                let direction = if d <= s {
+                    state.mut_object(obj_num).set_x(ex.to_num());
+                    state.mut_object(obj_num).set_y(ey.to_num());
                     0
                 } else {
                     let sx = dx.signum();
@@ -2308,15 +2390,12 @@ pub fn update_sprites(resources:&GameResources,state:&mut LogicState) {
                     let ey=FP32::from(state.object(&OBJECT_EGO).get_y_fp16());
                     let dx=ex.int()-x.int();
                     let dy=ey.int()-y.int();
-                    let s = FP32::from(state.object(obj_num).get_step_size());
-                    let d = state.object(obj_num).distance(state.object(&OBJECT_EGO));
-                    let direction = if dx.abs() <= s || dy.abs() <= s {
-                        0
-                    } else {
-                        let sx = dx.signum();
-                        let sy = dy.signum();
-                        get_direction_from_delta(sx.to_num(), sy.to_num())
-                    };
+                    let w1:i16 = state.object(obj_num).get_width().into();
+                    let w2:i16 = state.object(&OBJECT_EGO).get_width().into();
+                    let d = state.object(obj_num).distance(state.object(&OBJECT_EGO),w1,w2);
+                    let sx = dx.signum();
+                    let sy = dy.signum();
+                    let direction = get_direction_from_delta(sx.to_num(), sy.to_num());
                     state.mut_object(obj_num).set_direction(direction);
                     if d <= state.object(obj_num).follow_distance {
                         let mflag = state.object(obj_num).move_flag;
@@ -2586,27 +2665,24 @@ pub fn update_anims(resources:&GameResources,state:&mut LogicState) {
                 }
             }
 
-            // update cells in case we have switched loop
-            let cels = get_cells_clamped(resources, state.object(&obj_num));
-
             if state.object(&obj_num).cycle {
                 if !state.mut_object(&obj_num).should_cycle() {
                     continue;
                 }
                 let ccel = state.object(&obj_num).get_cel();
-                let last_cel = cels.len()-1;
+                let last_cel = state.object(&obj_num).get_last_cel() as usize;
                 // Next cel if able
                 match state.object(&obj_num).cycle_kind {
                     SpriteCycle::Reverse => {
                         if c > 0 {
-                            state.mut_object(&obj_num).set_cel(ccel.wrapping_sub(1));
+                            state.mut_object(&obj_num).set_cel(ccel.wrapping_sub(1),resources);
                         } else {
-                            state.mut_object(&obj_num).set_cel(last_cel as u8);
+                            state.mut_object(&obj_num).set_cel(last_cel as u8,resources);
                         }
                     },
                     SpriteCycle::OneShotReverse => {
                         if c > 0 {
-                            state.mut_object(&obj_num).set_cel(ccel.wrapping_sub(1));
+                            state.mut_object(&obj_num).set_cel(ccel.wrapping_sub(1),resources);
                         } else {
                             let oflag = state.object(&obj_num).cycle_flag;
                             state.set_flag(&oflag,true);
@@ -2615,14 +2691,14 @@ pub fn update_anims(resources:&GameResources,state:&mut LogicState) {
                     },
                     SpriteCycle::Normal => {
                         if last_cel > c {
-                            state.mut_object(&obj_num).set_cel(ccel.wrapping_add(1));
+                            state.mut_object(&obj_num).set_cel(ccel.wrapping_add(1),resources);
                         } else {
-                            state.mut_object(&obj_num).set_cel(0);
+                            state.mut_object(&obj_num).set_cel(0,resources);
                         }
                     }
                     SpriteCycle::OneShot => {
                         if last_cel > c {
-                            state.mut_object(&obj_num).set_cel(ccel.wrapping_add(1));
+                            state.mut_object(&obj_num).set_cel(ccel.wrapping_add(1),resources);
                         } else {
                             let oflag = state.object(&obj_num).cycle_flag;
                             state.set_flag(&oflag,true);
@@ -2631,9 +2707,7 @@ pub fn update_anims(resources:&GameResources,state:&mut LogicState) {
                     }
                 }
             }
-            state.mut_object(&obj_num).render_view=state.object(&obj_num).view;
-            state.mut_object(&obj_num).render_cloop=state.object(&obj_num).cloop;
-            state.mut_object(&obj_num).render_cel=state.object(&obj_num).cel;
+            state.mut_object(&obj_num).force_update();
         }
     }
 
@@ -2669,12 +2743,24 @@ fn erase_all_add_to_pic(state:&mut LogicState) {
 
 fn add_view_to_pic(resources: &GameResources, state:&mut LogicState, view:u8, cloop:u8, cel:u8, x:u8, y:u8, rpri:u8, margin:u8) {
 
-    // find free slot
+    // check for matching slot (because we don't draw to background, some things (SQ2) will render mutliple times to the same location with different views, we should only keep the most recent)
     let mut obj_num = type_object_from_u8(255);
+    let mut found=false;
     for a in (0..=255u8).rev() {
         obj_num = type_object_from_u8(a);
-        if !state.object(&obj_num).active {
+        let obj = state.object(&obj_num);
+        if obj.active && obj.added_to_pic && obj.get_x()==x && obj.get_y()==y { // Should we check width or not?
+            found=true;
             break;
+        }
+    }
+    if !found {
+        // find free slot
+        for a in (0..=255u8).rev() {
+            obj_num = type_object_from_u8(a);
+            if !state.object(&obj_num).active {
+                break;
+            }
         }
     }
 
@@ -2684,7 +2770,7 @@ fn add_view_to_pic(resources: &GameResources, state:&mut LogicState, view:u8, cl
     state.mut_object(&obj_num).added_to_pic=true;
     state.mut_object(&obj_num).set_view(view,resources);
     state.mut_object(&obj_num).set_loop(cloop,resources);
-    state.mut_object(&obj_num).set_cel(cel);
+    state.mut_object(&obj_num).set_cel(cel,resources);
     state.mut_object(&obj_num).set_visible(true);
     state.mut_object(&obj_num).set_frozen(true);
     state.mut_object(&obj_num).set_enable_motion(false);
@@ -2753,7 +2839,7 @@ fn render_sprite(obj_num:&TypeObject, cell: &view::ViewCel, state: &mut LogicSta
                 let pri = fetch_priority_for_pixel_rendering(state,sx,sy);
                 if pri <= state.object(obj_num).get_priority() {
                     // We double the pixels of sprites at this point
-                    let coord = sx*2+sy*SCREEN_WIDTH_USIZE;
+                    let coord = sx*2+(sy+(state.play_top as usize)*8)*SCREEN_WIDTH_USIZE;
                     state.post_sprites[coord]=col;
                     state.post_sprites[coord+1]=col;
                 }
