@@ -80,6 +80,10 @@ impl TypeGoto {
     }
 }
 
+pub const fn type_num_from_u8(n:u8) -> TypeNum {
+    TypeNum {value:n }
+}
+
 pub const fn type_var_from_u8(n:u8) -> TypeVar {
     TypeVar {value:n }
 }

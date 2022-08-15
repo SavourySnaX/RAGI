@@ -55,6 +55,8 @@ fn main() -> Result<(), String> {
         //interpretter.breakpoints.insert(LogicExecutionPosition::new(2,151), false);
         //interpretter.breakpoints.insert(LogicExecutionPosition::new(3,151), false);
         //interpretter.breakpoints.insert(LogicExecutionPosition::new(6,151), false);
+        //interpretter.set_breakpoint_on_instruction(&ActionOperation::Draw((type_object_from_u8(1),)), false);
+        //interpretter.set_breakpoint_on_instruction(&ActionOperation::AddToPic((type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),)), false);
 
         //cheat bypass questions
         interpretter.state.set_flag(&TypeFlag::from(109),true);

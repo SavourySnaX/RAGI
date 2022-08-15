@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, fmt, cmp::Ordering};
+use std::{collections::HashMap, fs, fmt, cmp::Ordering, hash::Hash};
 
 use dir_resource::{Root, ResourceDirectory, ResourceType, ResourcesVersion};
 use fixed::{FixedU16, FixedI32, types::extra::U8};
@@ -1253,6 +1253,7 @@ pub struct Interpretter {
     pub stack:Vec<LogicExecutionPosition>,
     pub keys:Vec<AgiKeyCodes>,
     pub breakpoints:HashMap<LogicExecutionPosition,bool>,
+    pub instruction_breakpoints:HashMap<&'static str,bool>,
     pub command_input_string:String,
     pub started:u64     // 1/20 ticks since started, so seconds is divdide this by 20
 }
@@ -1266,6 +1267,7 @@ impl Interpretter {
             stack: Vec::new(),
             keys: Vec::new(),
             breakpoints: HashMap::new(),
+            instruction_breakpoints: HashMap::new(),
             command_input_string: String::new(),
             started:0,
         };
@@ -1280,8 +1282,8 @@ impl Interpretter {
         !self.stack.is_empty() && !self.stack[self.stack.len()-1].is_input_request()
     }
 
-    pub fn do_call(breakpoints:&mut HashMap<LogicExecutionPosition,bool>,resources:&GameResources,stack:&mut Vec<LogicExecutionPosition>,state:&mut LogicState, logics:&HashMap<usize,LogicResource>,resume:bool,single_step:bool) {
-        let mut resume = resume;
+    pub fn do_call(breakpoints:&mut HashMap<LogicExecutionPosition,bool>,instruction_breakpoints:&mut HashMap<&'static str,bool>,resources:&GameResources,stack:&mut Vec<LogicExecutionPosition>,state:&mut LogicState, logics:&HashMap<usize,LogicResource>,resume:bool,single_step:bool) {
+        let mut resume = resume || single_step;
         while !stack.is_empty() {
             let stack_pos = stack.len()-1;
             let entry = stack[stack_pos];
@@ -1293,6 +1295,14 @@ impl Interpretter {
                     if breakpoints.contains_key(&exec) && !single_step {
                         if breakpoints[&exec] {
                             breakpoints.remove(&exec);
+                        }
+                        stack[stack_pos]=exec;
+                        return;
+                    }
+                    let t:&'static str = Interpretter::next_instruction(&exec,actions).into();
+                    if instruction_breakpoints.contains_key(t) {
+                        if instruction_breakpoints[t] {
+                            instruction_breakpoints.remove(t);
                         }
                         stack[stack_pos]=exec;
                         return;
@@ -1335,11 +1345,11 @@ impl Interpretter {
 
     }
 
-    pub fn call(breakpoints:&mut HashMap<LogicExecutionPosition,bool>,resources:&GameResources,stack:&mut Vec<LogicExecutionPosition>,state:&mut LogicState,logic_file:usize, logics:&HashMap<usize,LogicResource>,resume:bool,single_step:bool) {
+    pub fn call(breakpoints:&mut HashMap<LogicExecutionPosition,bool>,instruction_breakpoints:&mut HashMap<&'static str,bool>,resources:&GameResources,stack:&mut Vec<LogicExecutionPosition>,state:&mut LogicState,logic_file:usize, logics:&HashMap<usize,LogicResource>,resume:bool,single_step:bool) {
         if stack.is_empty() {
             stack.push(LogicExecutionPosition::new(logic_file,0));
         }
-        Interpretter::do_call(breakpoints, resources, stack, state,logics,resume,single_step);
+        Interpretter::do_call(breakpoints, instruction_breakpoints, resources, stack, state,logics,resume,single_step);
     }
 
     pub fn key_code_pressed(&mut self,key_code:AgiKeyCodes) {
@@ -1437,7 +1447,7 @@ impl Interpretter {
                 mutable_state.reset_new_room();
             }
             
-            Interpretter::call(&mut self.breakpoints,&self.resources,mutable_stack,mutable_state, 0, &self.resources.logic,resume,single_step);
+            Interpretter::call(&mut self.breakpoints,&mut self.instruction_breakpoints,&self.resources,mutable_stack,mutable_state, 0, &self.resources.logic,resume,single_step);
             if !mutable_stack.is_empty() {
                 break;
             } else {
@@ -1789,7 +1799,7 @@ impl Interpretter {
                 }
             },
             ActionOperation::SetString((s,m)) => { let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); state.set_string(s,m.as_str()); },
-            ActionOperation::Draw((obj,)) => if !state.object(obj).get_visible() { shuffle(state,resources,obj); state.mut_object(obj).set_visible(true); },
+            ActionOperation::Draw((obj,)) => if !state.object(obj).get_visible() { state.mut_object(obj).set_visible(true); shuffle(state,resources,obj); },
             ActionOperation::EndOfLoop((obj,flag)) => { state.set_flag(flag,false); state.mut_object(obj).set_one_shot(flag); },
             ActionOperation::MoveObj((obj,num1,num2,num3,flag)) => { 
                 let x=state.get_num(num1); let y=state.get_num(num2); let s=state.get_num(num3); 
@@ -1902,11 +1912,11 @@ impl Interpretter {
                     state.set_program_control();
                 }
             },
-            // TODO investigate, Position and RepositionTo act the same, should they (technically reposition clears old object first, but sprites in ragi don't work that way)
-            ActionOperation::Position((obj,num1,num2)) => { let x=state.get_num(num1); let y=state.get_num(num2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); shuffle(state,resources,obj); },
-            ActionOperation::RepositionTo((obj,num1,num2)) => { let x=state.get_num(num1); let y=state.get_num(num2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y);  shuffle(state,resources,obj); },
-            ActionOperation::RepositionToV((obj,var1,var2)) => {let x=state.get_var(var1); let y=state.get_var(var2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y);  shuffle(state,resources,obj); },
-            ActionOperation::PositionV((obj,var1,var2)) => { let x=state.get_var(var1); let y=state.get_var(var2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y);  shuffle(state,resources,obj); },
+            // TODO investigate, Position and RepositionTo act the same, should they (technically reposition clears old object first, but sprites in ragi don't work that way) (Position don't call shuffle, draw will)
+            ActionOperation::Position((obj,num1,num2)) => { let x=state.get_num(num1); let y=state.get_num(num2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
+            ActionOperation::RepositionTo((obj,num1,num2)) => { let x=state.get_num(num1); let y=state.get_num(num2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); shuffle(state,resources,obj); },
+            ActionOperation::RepositionToV((obj,var1,var2)) => {let x=state.get_var(var1); let y=state.get_var(var2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); shuffle(state,resources,obj); },
+            ActionOperation::PositionV((obj,var1,var2)) => { let x=state.get_var(var1); let y=state.get_var(var2); state.mut_object(obj).set_x(x); state.mut_object(obj).set_y(y); },
             ActionOperation::SetTextAttribute((num1,num2)) => { let ink=state.get_num(num1); let paper=state.get_num(num2); state.set_ink(ink); state.set_paper(paper); }
             ActionOperation::StatusLineOff(()) => state.set_status_visible(false),
             ActionOperation::StepTime((obj,var)) => { let time=state.get_var(var); state.mut_object(obj).set_step_time(time); },
@@ -2036,7 +2046,9 @@ impl Interpretter {
                 }
                 for x in c1..=c2 {
                     for y in r1..=r2 {
-                        state.back_buffer[x+(y+(state.play_top as usize)*8)*SCREEN_WIDTH_USIZE] = col;
+                        if y+(state.play_top as usize)*8 < SCREEN_HEIGHT_USIZE {
+                            state.back_buffer[x+(y+(state.play_top as usize)*8)*SCREEN_WIDTH_USIZE] = col;
+                        }
                         state.text_buffer[x+y*SCREEN_WIDTH_USIZE] = 255;
                     }
                 }
@@ -2217,12 +2229,20 @@ impl Interpretter {
         }
     }
 
+    pub fn next_instruction<'a>(pc:&LogicExecutionPosition,actions:&'a [LogicOperation]) -> &'a ActionOperation {
+        &actions[pc.program_counter].action
+    }
+
     pub fn interpret_instructions(resources:&GameResources,state:&mut LogicState,pc:&LogicExecutionPosition,actions:&[LogicOperation],logic_sequence:&LogicSequence) -> Option<LogicExecutionPosition> {
         Interpretter::interpret_instruction(resources, state, pc, &actions[pc.program_counter].action,logic_sequence)
     }
 
     pub fn set_breakpoint(&mut self,file:usize,pc:usize,temporary:bool) {
         self.breakpoints.insert(LogicExecutionPosition::new(file,pc), temporary);
+    }
+    
+    pub fn set_breakpoint_on_instruction(&mut self,operation:&ActionOperation,temporary:bool) {
+        self.instruction_breakpoints.insert(operation.into(), temporary);
     }
 
 }
@@ -2542,7 +2562,7 @@ pub fn update_move(resources:&GameResources,state:&mut LogicState,obj_num:&TypeO
     let cell = &cels[c];
 
     let w = cell.get_width() as usize;
-    let h = cell.get_height() as usize;
+    let _h = cell.get_height() as usize;
     let tx:usize = nx.to_num();
     let ty:usize = ny.to_num();
     
@@ -2849,6 +2869,7 @@ fn add_view_to_pic(resources: &GameResources, state:&mut LogicState, view:u8, cl
     state.mut_object(&obj_num).set_visible(true);
     state.mut_object(&obj_num).set_frozen(true);
     state.mut_object(&obj_num).set_enable_motion(false);
+    state.mut_object(&obj_num).set_ignore_barriers(true);
     state.mut_object(&obj_num).set_priority(rpri);
     state.mut_object(&obj_num).set_x(x);
     state.mut_object(&obj_num).set_y(y);
@@ -2858,7 +2879,7 @@ fn add_view_to_pic(resources: &GameResources, state:&mut LogicState, view:u8, cl
     let loops = &view.get_loops()[cloop as usize];
     let cel = &loops.get_cels()[cel as usize];
     let w:usize = cel.get_width().into();
-    let h:usize = cel.get_height().into();
+    let _h:usize = cel.get_height().into();
 
     shuffle(state,resources,&obj_num);
 
@@ -2924,7 +2945,7 @@ fn render_sprite(obj_num:&TypeObject, cell: &view::ViewCel, state: &mut LogicSta
     }
 }
 
-fn shuffle(state:&mut LogicState,resources:&GameResources,obj:&TypeObject) {
+fn shuffle(state:&mut LogicState,_resources:&GameResources,obj:&TypeObject) {
 
     let mut shuffle_state=0;
     let mut cnt=1;
