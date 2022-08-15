@@ -742,6 +742,8 @@ pub struct LogicState {
     menu:[Menu;256],    // overkill
     menu_ready:bool,
     menu_input:bool,
+    menu_num:u8,
+    menu_item:u8,
     menu_has_key:bool,
     menu_key:TypeController,
 
@@ -758,6 +760,7 @@ pub struct LogicState {
     post_sprites:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
 
     text_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+    menu_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
     final_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
 }
 
@@ -803,6 +806,8 @@ impl LogicState {
             menu_ready: false,
             menu_input: false,
             menu_has_key: false,
+            menu_num: 0,
+            menu_item: 0,
             menu_key: TypeController::from(0u8),
             key_len:0,
             key_buffer:[AgiKeyCodes::Enter;256],
@@ -812,6 +817,7 @@ impl LogicState {
             back_buffer:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
             post_sprites:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
             text_buffer:[255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+            menu_buffer:[255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
             final_buffer:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
         }
     }
@@ -1152,6 +1158,15 @@ impl LogicState {
                 self.final_buffer[i]=self.text_buffer[i];
             }
         }
+
+        // Overlay menu
+        if self.menu_input {
+            for i in 0..SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE {
+                if self.menu_buffer[i]!=255 {
+                    self.final_buffer[i]=self.menu_buffer[i];
+                }
+            }
+        }
     }
 
     pub fn clear_keys(&mut self) {
@@ -1196,7 +1211,7 @@ impl LogicState {
         false
     }
 
-    pub fn is_controller_pressed(&self,key:&TypeController) -> bool {
+    pub fn is_controller_pressed(&mut self,key:&TypeController) -> bool {
         if let Some(keys) = self.controllers.get(&key.get_value()) {
             for key in keys {
                 for a in 0..self.key_len {
@@ -1204,6 +1219,12 @@ impl LogicState {
                         return true;
                     }
                 }
+            }
+        }
+        if self.menu_has_key {
+            if key.get_value() == self.menu_key.get_value() {
+                self.menu_has_key=false;
+                return true;
             }
         }
         false
@@ -1476,10 +1497,48 @@ impl Interpretter {
         let mut resuming = !self.stack.is_empty();
         let mutable_state = &mut self.state;
         if !resuming && mutable_state.menu_input {
-            println!("MENU");
-            return;
-        }
+            let mut last_menu=255;
+            for n in 0u8..=255 {
+                let s = mutable_state.menu[n as usize].name.clone();
+                if s.len()==0 {
+                    break;
+                }
+                last_menu=n;
+            }
+            mutable_state.menu_buffer=[255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
+            for y in 0..8 {
+                for x in 0..SCREEN_WIDTH_USIZE {
+                    mutable_state.menu_buffer[x+y*SCREEN_WIDTH_USIZE]=15;
+                }
+            }
+            let mut x = 0;
+            for n in 0u8..=255 {
+                let s = mutable_state.menu[n as usize].name.clone();
+                if s.len()==0 {
+                    break;
+                } else {
+                    Self::display_menu(&self.resources, mutable_state, x, 0, n);
+                    x+=s.len() as u8;
+                }
+            }
 
+            let last_item = (mutable_state.menu[mutable_state.menu_num as usize].items.len()-1) as u8;
+
+            for k in &self.keys {
+                match k {
+                    AgiKeyCodes::Left => if mutable_state.menu_num>0 { mutable_state.menu_num-=1 } else { mutable_state.menu_num=last_menu },
+                    AgiKeyCodes::Right => if mutable_state.menu_num<last_menu { mutable_state.menu_num+=1 } else { mutable_state.menu_num=0 },
+                    AgiKeyCodes::Up => if mutable_state.menu_item>0 { mutable_state.menu_item-=1 } else { mutable_state.menu_item=last_item },
+                    AgiKeyCodes::Down => if mutable_state.menu_item<last_item { mutable_state.menu_item+=1 } else { mutable_state.menu_item=0 },
+                    AgiKeyCodes::Escape => { mutable_state.menu_input=false; mutable_state.menu_has_key=false; },
+                    AgiKeyCodes::Enter => { mutable_state.menu_input=false; mutable_state.menu_has_key=true; mutable_state.menu_key=mutable_state.menu[mutable_state.menu_num as usize].items[mutable_state.menu_item as usize].controller; },
+                    _ => {},
+                }
+            }
+
+            mutable_state.render_final_buffer(&self.resources);
+            return;
+        } 
 
         let mutable_stack = &mut self.stack;
 
@@ -1625,7 +1684,26 @@ impl Interpretter {
                 key_pressed
             },
             ConditionOperation::Said((w,)) => state.check_said(w),
-            ConditionOperation::CompareStrings(_) => todo!(),
+            ConditionOperation::CompareStrings((a,b)) => {
+                let a=state.get_string(a).as_bytes();
+                let b=state.get_string(b).as_bytes();
+                let mut ai=0;
+                let mut bi=0;
+                while ai<a.len() && bi<b.len() {
+                    if a[ai]==b' ' {
+                        ai+=1;
+                        continue;
+                    }
+                    if b[bi]==b' ' {
+                        bi+=1;
+                        continue;
+                    }
+                    if !a[ai].eq_ignore_ascii_case(&b[bi]) {
+                        return false;
+                    }
+                }
+                ai==a.len() && bi==b.len()
+            },
             ConditionOperation::ObjInBox((obj,num1,num2,num3,num4)) => is_left_and_right_edge_in_box(resources,state,obj,num1, num2,num3,num4),
             ConditionOperation::CenterPosn((obj,num1,num2,num3,num4)) => is_center_edge_in_box(resources, state, obj, num1, num2, num3, num4),
             ConditionOperation::RightPosn((obj,num1,num2,num3,num4)) => is_right_edge_in_box(resources,state,obj,num1,num2,num3,num4),
@@ -2322,7 +2400,7 @@ impl Interpretter {
         }
     }
 
-    pub fn render_glyph(resources:&GameResources,state:&mut LogicState,x:u16,y:u8,g:u8,ink:u8,paper:u8) {
+    pub fn render_glyph(resources:&GameResources,buffer:&mut [u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],x:u16,y:u8,g:u8,ink:u8,paper:u8) {
         let s = resources.font.as_slice();
         let x = x as usize;
         let y = y as usize;
@@ -2331,12 +2409,72 @@ impl Interpretter {
             let mut bits = s[index];
             for xx in 0..8 {
                 if (bits & 0x80) == 0x80 {
-                    state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = ink;
+                    buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = ink;
                 } else {
-                    state.text_buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = paper;
+                    buffer[x+xx+(y+yy)*SCREEN_WIDTH_USIZE] = paper;
                 }
                 bits<<=1;
             }
+        }
+    }
+    
+    // TODO disabled items (needs input handling and rendering support)
+    pub fn display_menu_item(resources:&GameResources,state:&mut LogicState,x:u8,y:u8,menu:u8,item:u8) {
+        let mut x = (x as u16)*8;
+        let y=y*8;
+        let m = &state.menu[menu as usize].items[item as usize];
+        let s = &m.description;
+        let ink:u8;
+        let paper:u8;
+        if item == state.menu_item {
+            ink=15;
+            paper=0;
+        } else {
+            ink=0;
+            paper=15;
+        }
+        for l in s.as_bytes() {
+            Self::render_glyph(resources, &mut state.menu_buffer, x, y, *l,ink,paper);
+            x+=8;
+        }
+    }
+
+
+    pub fn display_menu(resources:&GameResources,state:&mut LogicState,x:u8,y:u8,menu:u8) {
+        let ox=x;
+        let oy = y;
+        let mut x = (ox as u16)*8;
+        let mut y=oy*8;
+        let s = &state.menu[menu as usize].name;
+        let ink:u8;
+        let paper:u8;
+        let selected;
+        if menu == state.menu_num {
+            ink=15;
+            paper=0;
+            selected=true;
+        } else {
+            ink=0;
+            paper=15;
+            selected=false;
+        }
+        for l in s.as_bytes() {
+            if *l == b'\n' {
+                y+=8;
+                x=0;
+            } else {
+                Self::render_glyph(resources, &mut state.menu_buffer, x, y, *l,ink,paper);
+                x+=8;
+            }
+        }
+
+        if selected {
+            let len = state.menu[menu as usize].items[0].description.len() as u8;
+            let nx = if ox + len-1 >= 40 { 40-len} else {ox};
+            for n in 0u8..state.menu[menu as usize].items.len() as u8 {
+                Self::display_menu_item(resources, state, nx, oy+n+1, menu, n);
+            }
+
         }
     }
 
@@ -2348,7 +2486,7 @@ impl Interpretter {
                 y+=8;
                 x=0;
             } else {
-                Self::render_glyph(resources, state, x, y, *l,ink,paper);
+                Self::render_glyph(resources, &mut state.text_buffer, x, y, *l,ink,paper);
                 x+=8;
             }
         }
@@ -2361,19 +2499,19 @@ impl Interpretter {
         state.windows[w].y0=y0;
         state.windows[w].y1=y1;
 
-        Self::render_glyph(resources, state, x0*8, y0*8, 218 , ink, paper);
-        Self::render_glyph(resources, state, x1*8, y0*8, 191 , ink, paper);
-        Self::render_glyph(resources, state, x0*8, y1*8, 192 , ink, paper);
-        Self::render_glyph(resources, state, x1*8, y1*8, 217 , ink, paper);
+        Self::render_glyph(resources, &mut state.text_buffer, x0*8, y0*8, 218 , ink, paper);
+        Self::render_glyph(resources, &mut state.text_buffer, x1*8, y0*8, 191 , ink, paper);
+        Self::render_glyph(resources, &mut state.text_buffer, x0*8, y1*8, 192 , ink, paper);
+        Self::render_glyph(resources, &mut state.text_buffer, x1*8, y1*8, 217 , ink, paper);
         for x in (x0+1)..x1 {
-            Self::render_glyph(resources, state, x*8, y0*8, 196 , ink, paper);
-            Self::render_glyph(resources, state, x*8, y1*8, 196 , ink, paper);
+            Self::render_glyph(resources, &mut state.text_buffer, x*8, y0*8, 196 , ink, paper);
+            Self::render_glyph(resources, &mut state.text_buffer, x*8, y1*8, 196 , ink, paper);
         }
         for y in (y0+1)..y1 {
-            Self::render_glyph(resources, state, x0*8, y*8, 179 , ink, paper);
-            Self::render_glyph(resources, state, x1*8, y*8, 179 , ink, paper);
+            Self::render_glyph(resources, &mut state.text_buffer, x0*8, y*8, 179 , ink, paper);
+            Self::render_glyph(resources, &mut state.text_buffer, x1*8, y*8, 179 , ink, paper);
             for x in (x0+1)..x1 {
-                Self::render_glyph(resources, state, x*8, y*8, 32 , ink, paper);
+                Self::render_glyph(resources, &mut state.text_buffer, x*8, y*8, 32 , ink, paper);
             }
         }
     }
@@ -2387,7 +2525,7 @@ impl Interpretter {
             if !state.windows[w].is_empty() {
                 for y in state.windows[w].y0..=state.windows[w].y1 {
                     for x in state.windows[w].x0..=state.windows[w].x1 {
-                        Self::render_glyph(resources, state, x*8, y*8, 32 , 4, 255);
+                        Self::render_glyph(resources, &mut state.text_buffer, x*8, y*8, 32 , 4, 255);
                     }
                 }
             }
@@ -2476,7 +2614,7 @@ impl Interpretter {
                 split_loc+=1;
             }
             if *c!=b'\n' {
-                Self::render_glyph(resources, state, x, y, *c, 0, 15);
+                Self::render_glyph(resources, &mut state.text_buffer, x, y, *c, 0, 15);
                 x+=8;
             }
         }
