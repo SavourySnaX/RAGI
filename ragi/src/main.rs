@@ -8,7 +8,7 @@ use logic::*;
 
 use picture::{PIC_HEIGHT_USIZE, PIC_WIDTH_USIZE};
 use sdl2::event::Event;
-use sdl2::keyboard::{Keycode, Scancode};
+use sdl2::keyboard::{Keycode, Mod};
 use imgui::*;
 
 
@@ -35,7 +35,8 @@ fn main() -> Result<(), String> {
         //interpretter.set_breakpoint(4,44,true);
     } else if DP1 {
         interpretter=Interpretter::new("../images/agi_demo_pack_1/","2.915").unwrap();
-        interpretter.set_breakpoint(161,1,true);
+        //interpretter.set_breakpoint(161,1,true);
+        interpretter.set_breakpoint_on_instruction(&ActionOperation::ClearTextRect((type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),)), false);
     } else if KQ1 {
         //interpretter=Interpretter::new("../images/King's Quest v2.0F (AGI 2.425) (1987)(Sierra On-Line, Inc.) [Adventure]/","2.425").unwrap();
         interpretter=Interpretter::new("../images/King's Quest v1.0U (1986)(Sierra On-Line, Inc.) [Adventure][!]/","2.272").unwrap();
@@ -57,12 +58,14 @@ fn main() -> Result<(), String> {
         //interpretter.breakpoints.insert(LogicExecutionPosition::new(6,151), false);
         //interpretter.set_breakpoint_on_instruction(&ActionOperation::Draw((type_object_from_u8(1),)), false);
         //interpretter.set_breakpoint_on_instruction(&ActionOperation::AddToPic((type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),)), false);
+        //interpretter.set_breakpoint_on_instruction(&ActionOperation::MenuInput(()), false);
 
         //cheat bypass questions
         interpretter.state.set_flag(&TypeFlag::from(109),true);
     } else if SQ1 {
         interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/","2.089").unwrap();
-        interpretter.set_breakpoint(5,54,false);
+        //interpretter.set_breakpoint(5,54,false);
+        interpretter.set_breakpoint_on_instruction(&ActionOperation::Draw((type_object_from_u8(1),)), false);
     } else if SQ2 {
         interpretter=Interpretter::new("../images/Space Quest II- Chapter II - Vohaul's Revenge v2.0C (1987)(Sierra On-Line, Inc.) [Adventure]/","2.917").unwrap();
         interpretter.set_breakpoint(2,147,true);
@@ -132,8 +135,8 @@ fn main() -> Result<(), String> {
                 Event::KeyDown { keycode: Some(Keycode::F12), .. } => {
                     break 'running;
                 },
-                Event::KeyDown { keycode: Some(code), scancode: Some(scode), ..} => {
-                    if let Some(agi_code) = map_keycodes(code,scode) {
+                Event::KeyDown { keycode: Some(code), keymod:modifier,..} => {
+                    if let Some(agi_code) = map_keycodes(code,modifier) {
                         interpretter.key_code_pressed(agi_code);
                     }
                 }
@@ -334,64 +337,128 @@ fn main() -> Result<(), String> {
 }
 
 
-pub fn map_keycodes(code:Keycode,_scode:Scancode) -> Option<AgiKeyCodes> {
-    match code {
-        Keycode::Left => Some(AgiKeyCodes::Left),
-        Keycode::Right => Some(AgiKeyCodes::Right),
-        Keycode::Down => Some(AgiKeyCodes::Down),
-        Keycode::Up => Some(AgiKeyCodes::Up),
-        Keycode::Escape => Some(AgiKeyCodes::Escape),
-        Keycode::Return => Some(AgiKeyCodes::Enter),
-        Keycode::Space => Some(AgiKeyCodes::Space),
-        Keycode::Backspace => Some(AgiKeyCodes::Backspace),
-        Keycode::Tab => Some(AgiKeyCodes::Tab),
-        Keycode::Num0 => Some(AgiKeyCodes::_0),
-        Keycode::Num1 => Some(AgiKeyCodes::_1),
-        Keycode::Num2 => Some(AgiKeyCodes::_2),
-        Keycode::Num3 => Some(AgiKeyCodes::_3),
-        Keycode::Num4 => Some(AgiKeyCodes::_4),
-        Keycode::Num5 => Some(AgiKeyCodes::_5),
-        Keycode::Num6 => Some(AgiKeyCodes::_6),
-        Keycode::Num7 => Some(AgiKeyCodes::_7),
-        Keycode::Num8 => Some(AgiKeyCodes::_8),
-        Keycode::Num9 => Some(AgiKeyCodes::_9),
-        Keycode::A => Some(AgiKeyCodes::A),
-        Keycode::B => Some(AgiKeyCodes::B),
-        Keycode::C => Some(AgiKeyCodes::C),
-        Keycode::D => Some(AgiKeyCodes::D),
-        Keycode::E => Some(AgiKeyCodes::E),
-        Keycode::F => Some(AgiKeyCodes::F),
-        Keycode::G => Some(AgiKeyCodes::G),
-        Keycode::H => Some(AgiKeyCodes::H),
-        Keycode::I => Some(AgiKeyCodes::I),
-        Keycode::J => Some(AgiKeyCodes::J),
-        Keycode::K => Some(AgiKeyCodes::K),
-        Keycode::L => Some(AgiKeyCodes::L),
-        Keycode::M => Some(AgiKeyCodes::M),
-        Keycode::N => Some(AgiKeyCodes::N),
-        Keycode::O => Some(AgiKeyCodes::O),
-        Keycode::P => Some(AgiKeyCodes::P),
-        Keycode::Q => Some(AgiKeyCodes::Q),
-        Keycode::R => Some(AgiKeyCodes::R),
-        Keycode::S => Some(AgiKeyCodes::S),
-        Keycode::T => Some(AgiKeyCodes::T),
-        Keycode::U => Some(AgiKeyCodes::U),
-        Keycode::V => Some(AgiKeyCodes::V),
-        Keycode::W => Some(AgiKeyCodes::W),
-        Keycode::X => Some(AgiKeyCodes::X),
-        Keycode::Y => Some(AgiKeyCodes::Y),
-        Keycode::Z => Some(AgiKeyCodes::Z),
-        Keycode::F1 => Some(AgiKeyCodes::F1),
-        Keycode::F2 => Some(AgiKeyCodes::F2),
-        Keycode::F3 => Some(AgiKeyCodes::F3),
-        Keycode::F4 => Some(AgiKeyCodes::F4),
-        Keycode::F5 => Some(AgiKeyCodes::F5),
-        Keycode::F6 => Some(AgiKeyCodes::F6),
-        Keycode::F7 => Some(AgiKeyCodes::F7),
-        Keycode::F8 => Some(AgiKeyCodes::F8),
-        Keycode::F9 => Some(AgiKeyCodes::F9),
-        Keycode::F10 => Some(AgiKeyCodes::F10),
-        _ => {/* println!("Unmapped Keycode {} : {}",code as i32,scode as i32);*/ None},
+pub fn map_keycodes(code:Keycode,modifiers:Mod) -> Option<AgiKeyCodes> {
+    if modifiers == Mod::LALTMOD || modifiers == Mod::RALTMOD {
+        match code {
+            Keycode::A => Some(AgiKeyCodes::AltA),
+            Keycode::B => Some(AgiKeyCodes::AltB),
+            Keycode::C => Some(AgiKeyCodes::AltC),
+            Keycode::D => Some(AgiKeyCodes::AltD),
+            Keycode::E => Some(AgiKeyCodes::AltE),
+            Keycode::F => Some(AgiKeyCodes::AltF),
+            Keycode::G => Some(AgiKeyCodes::AltG),
+            Keycode::H => Some(AgiKeyCodes::AltH),
+            Keycode::I => Some(AgiKeyCodes::AltI),
+            Keycode::J => Some(AgiKeyCodes::AltJ),
+            Keycode::K => Some(AgiKeyCodes::AltK),
+            Keycode::L => Some(AgiKeyCodes::AltL),
+            Keycode::M => Some(AgiKeyCodes::AltM),
+            Keycode::N => Some(AgiKeyCodes::AltN),
+            Keycode::O => Some(AgiKeyCodes::AltO),
+            Keycode::P => Some(AgiKeyCodes::AltP),
+            Keycode::Q => Some(AgiKeyCodes::AltQ),
+            Keycode::R => Some(AgiKeyCodes::AltR),
+            Keycode::S => Some(AgiKeyCodes::AltS),
+            Keycode::T => Some(AgiKeyCodes::AltT),
+            Keycode::U => Some(AgiKeyCodes::AltU),
+            Keycode::V => Some(AgiKeyCodes::AltV),
+            Keycode::W => Some(AgiKeyCodes::AltW),
+            Keycode::X => Some(AgiKeyCodes::AltX),
+            Keycode::Y => Some(AgiKeyCodes::AltY),
+            Keycode::Z => Some(AgiKeyCodes::AltZ),
+            _ => None,
+        }
+    } else if modifiers == Mod::LCTRLMOD || modifiers == Mod::RCTRLMOD {
+        match code {
+            Keycode::A => Some(AgiKeyCodes::CtrlA),
+            Keycode::B => Some(AgiKeyCodes::CtrlB),
+            Keycode::C => Some(AgiKeyCodes::CtrlC),
+            Keycode::D => Some(AgiKeyCodes::CtrlD),
+            Keycode::E => Some(AgiKeyCodes::CtrlE),
+            Keycode::F => Some(AgiKeyCodes::CtrlF),
+            Keycode::G => Some(AgiKeyCodes::CtrlG),
+            Keycode::H => Some(AgiKeyCodes::CtrlH),
+            Keycode::I => Some(AgiKeyCodes::CtrlI),
+            Keycode::J => Some(AgiKeyCodes::CtrlJ),
+            Keycode::K => Some(AgiKeyCodes::CtrlK),
+            Keycode::L => Some(AgiKeyCodes::CtrlL),
+            Keycode::M => Some(AgiKeyCodes::CtrlM),
+            Keycode::N => Some(AgiKeyCodes::CtrlN),
+            Keycode::O => Some(AgiKeyCodes::CtrlO),
+            Keycode::P => Some(AgiKeyCodes::CtrlP),
+            Keycode::Q => Some(AgiKeyCodes::CtrlQ),
+            Keycode::R => Some(AgiKeyCodes::CtrlR),
+            Keycode::S => Some(AgiKeyCodes::CtrlS),
+            Keycode::T => Some(AgiKeyCodes::CtrlT),
+            Keycode::U => Some(AgiKeyCodes::CtrlU),
+            Keycode::V => Some(AgiKeyCodes::CtrlV),
+            Keycode::W => Some(AgiKeyCodes::CtrlW),
+            Keycode::X => Some(AgiKeyCodes::CtrlX),
+            Keycode::Y => Some(AgiKeyCodes::CtrlY),
+            Keycode::Z => Some(AgiKeyCodes::CtrlZ),
+            _ => None,
+        }
+    } else {
+        match code {
+            Keycode::Left => Some(AgiKeyCodes::Left),
+            Keycode::Right => Some(AgiKeyCodes::Right),
+            Keycode::Down => Some(AgiKeyCodes::Down),
+            Keycode::Up => Some(AgiKeyCodes::Up),
+            Keycode::Escape => Some(AgiKeyCodes::Escape),
+            Keycode::Return => Some(AgiKeyCodes::Enter),
+            Keycode::Space => Some(AgiKeyCodes::Space),
+            Keycode::Backspace => Some(AgiKeyCodes::Backspace),
+            Keycode::Tab => Some(AgiKeyCodes::TAB),
+            Keycode::Num0 => Some(AgiKeyCodes::_0),
+            Keycode::Num1 => Some(AgiKeyCodes::_1),
+            Keycode::Num2 => Some(AgiKeyCodes::_2),
+            Keycode::Num3 => Some(AgiKeyCodes::_3),
+            Keycode::Num4 => Some(AgiKeyCodes::_4),
+            Keycode::Num5 => Some(AgiKeyCodes::_5),
+            Keycode::Num6 => Some(AgiKeyCodes::_6),
+            Keycode::Num7 => Some(AgiKeyCodes::_7),
+            Keycode::Num8 => Some(AgiKeyCodes::_8),
+            Keycode::Num9 => Some(AgiKeyCodes::_9),
+            Keycode::A => Some(AgiKeyCodes::A),
+            Keycode::B => Some(AgiKeyCodes::B),
+            Keycode::C => Some(AgiKeyCodes::C),
+            Keycode::D => Some(AgiKeyCodes::D),
+            Keycode::E => Some(AgiKeyCodes::E),
+            Keycode::F => Some(AgiKeyCodes::F),
+            Keycode::G => Some(AgiKeyCodes::G),
+            Keycode::H => Some(AgiKeyCodes::H),
+            Keycode::I => Some(AgiKeyCodes::I),
+            Keycode::J => Some(AgiKeyCodes::J),
+            Keycode::K => Some(AgiKeyCodes::K),
+            Keycode::L => Some(AgiKeyCodes::L),
+            Keycode::M => Some(AgiKeyCodes::M),
+            Keycode::N => Some(AgiKeyCodes::N),
+            Keycode::O => Some(AgiKeyCodes::O),
+            Keycode::P => Some(AgiKeyCodes::P),
+            Keycode::Q => Some(AgiKeyCodes::Q),
+            Keycode::R => Some(AgiKeyCodes::R),
+            Keycode::S => Some(AgiKeyCodes::S),
+            Keycode::T => Some(AgiKeyCodes::T),
+            Keycode::U => Some(AgiKeyCodes::U),
+            Keycode::V => Some(AgiKeyCodes::V),
+            Keycode::W => Some(AgiKeyCodes::W),
+            Keycode::X => Some(AgiKeyCodes::X),
+            Keycode::Y => Some(AgiKeyCodes::Y),
+            Keycode::Z => Some(AgiKeyCodes::Z),
+            Keycode::F1 => Some(AgiKeyCodes::F1),
+            Keycode::F2 => Some(AgiKeyCodes::F2),
+            Keycode::F3 => Some(AgiKeyCodes::F3),
+            Keycode::F4 => Some(AgiKeyCodes::F4),
+            Keycode::F5 => Some(AgiKeyCodes::F5),
+            Keycode::F6 => Some(AgiKeyCodes::F6),
+            Keycode::F7 => Some(AgiKeyCodes::F7),
+            Keycode::F8 => Some(AgiKeyCodes::F8),
+            Keycode::F9 => Some(AgiKeyCodes::F9),
+            Keycode::F10 => Some(AgiKeyCodes::F10),
+            Keycode::Minus => Some(AgiKeyCodes::Minus),
+            Keycode::Equals => Some(AgiKeyCodes::Equals),
+            _ => {/* println!("Unmapped Keycode {} : {}",code as i32,scode as i32);*/ None},
+        }
     }
 }
 

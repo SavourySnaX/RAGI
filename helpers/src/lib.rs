@@ -86,7 +86,8 @@ pub fn conv_rgba(data: &[u8]) -> Vec<u8> {
 
 fn conv_colour(a: &u8, trans:bool) -> [u8;4] {
     match a {
-        15..=255 => [255u8,255,255,if trans {0} else {255}],
+            255  => [255u8,0,255,if trans {0} else {255}],
+        15..=254 => [255u8,255,255,if trans {0} else {255}],
               14 => [255u8,255,127,if trans {0} else {255}],
               13 => [255u8,127,255,if trans {0} else {255}],
               12 => [255u8,127,127,if trans {0} else {255}],

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, fmt, cmp::Ordering, hash::Hash};
+use std::{collections::HashMap, fs, fmt, cmp::Ordering, hash::Hash, process::exit};
 
 use dir_resource::{Root, ResourceDirectory, ResourceType, ResourcesVersion};
 use fixed::{FixedU16, FixedI32, types::extra::U8};
@@ -40,6 +40,9 @@ pub const VAR_CURRENT_KEY:TypeVar = type_var_from_u8(19);
 
 pub const VAR_MESSAGE_WINDOW_TIMER:TypeVar = type_var_from_u8(21);
 
+pub const VAR_INVENTORY_SELECTED:TypeVar = type_var_from_u8(25);
+pub const VAR_MONITOR_TYPE:TypeVar = type_var_from_u8(26);
+
 pub const FLAG_EGO_IN_WATER:TypeFlag = type_flag_from_u8(0);
 
 pub const FLAG_COMMAND_ENTERED:TypeFlag = type_flag_from_u8(2);
@@ -48,8 +51,11 @@ pub const FLAG_SAID_ACCEPTED_INPUT:TypeFlag = type_flag_from_u8(4);
 pub const FLAG_ROOM_FIRST_TIME:TypeFlag = type_flag_from_u8(5);
 pub const FLAG_RESTART_GAME:TypeFlag = type_flag_from_u8(6);
 
-pub const FLAG_RESTORE_GAME:TypeFlag = type_flag_from_u8(12);
+pub const FLAG_SOUND_ENABLED:TypeFlag = type_flag_from_u8(9);
 
+pub const FLAG_RESTORE_GAME:TypeFlag = type_flag_from_u8(12);
+pub const FLAG_INVENTORY_SELECTION:TypeFlag = type_flag_from_u8(13);
+pub const FLAG_MENU_ENABLED:TypeFlag = type_flag_from_u8(14);
 pub const FLAG_LEAVE_WINDOW_OPEN:TypeFlag = type_flag_from_u8(15);
 
 type FP16=FixedU16<U8>;
@@ -202,7 +208,7 @@ impl Sprite {
     }
     
     pub fn get_height(&self) -> u8 {
-        self.render_width
+        self.render_height
     }
 
     pub fn get_visible(&self) -> bool {
@@ -440,6 +446,8 @@ impl Sprite {
         if self.cel>self.last_cel {
             self.cel=0;
         }
+        self.width = resources.views[&(self.view as usize)].get_loops()[self.cloop as usize].get_cels()[self.cel as usize].get_width();
+        self.height = resources.views[&(self.view as usize)].get_loops()[self.cloop as usize].get_cels()[self.cel as usize].get_height();
     }
 
     pub fn set_loop(&mut self,n:u8, resources:&GameResources) {
@@ -451,6 +459,8 @@ impl Sprite {
         if self.cel>self.last_cel {
             self.cel=0;
         }
+        self.width = resources.views[&(self.view as usize)].get_loops()[self.cloop as usize].get_cels()[self.cel as usize].get_width();
+        self.height = resources.views[&(self.view as usize)].get_loops()[self.cloop as usize].get_cels()[self.cel as usize].get_height();
     }
     
     pub fn set_cel(&mut self,n:u8,resources:&GameResources) {
@@ -677,6 +687,23 @@ impl TextWindow {
     }
 }
 
+pub struct MenuItem {
+    description:String,
+    controller:TypeController,
+    enabled:bool,
+}
+
+pub struct Menu {
+    name:String,
+    items:Vec<MenuItem>,
+}
+
+impl Menu {
+    pub fn new() -> Menu {
+        Menu {name:String::new(),items:Vec::new()}
+    }
+}
+
 pub struct LogicState {
     rng:ThreadRng,
     new_room:u8,
@@ -696,6 +723,8 @@ pub struct LogicState {
     item_location:[u8;256],
 
     num_string:String,
+    command_input:String,
+    previous_input:String,
     prompt:char,
     parsed_input_string:String,
 
@@ -709,8 +738,15 @@ pub struct LogicState {
     windows:[TextWindow;2], // Holds the co-ordinates of the message window last drawn (and item from show.obj)
     displayed:String,
 
+    //menus
+    menu:[Menu;256],    // overkill
+    menu_ready:bool,
+    menu_input:bool,
+    menu_has_key:bool,
+    menu_key:TypeController,
+
     //input
-    controllers:HashMap<u8,AgiKeyCodes>,
+    controllers:HashMap<u8,Vec<AgiKeyCodes>>,
     key_len:usize,
     key_buffer:[AgiKeyCodes;256],
 
@@ -752,6 +788,8 @@ impl LogicState {
             item_location: [0u8;256],
             logic_start: [0usize;256],
             num_string: String::from(""),
+            command_input: String::from(""),
+            previous_input: String::from(""),
             prompt:'_',
             parsed_input_string: String::from(""),
             windows:[();2].map(|_| TextWindow::new()),
@@ -761,6 +799,11 @@ impl LogicState {
             play_top: 0,
             input_line: 21,
             status_line: 23,
+            menu: [();256].map(|_| Menu::new()),
+            menu_ready: false,
+            menu_input: false,
+            menu_has_key: false,
+            menu_key: TypeController::from(0u8),
             key_len:0,
             key_buffer:[AgiKeyCodes::Enter;256],
             controllers:HashMap::new(),
@@ -829,6 +872,10 @@ impl LogicState {
 
     pub fn get_num_string(&self) -> &String {
         &self.num_string
+    }
+
+    pub fn get_input_string(&self) -> &String {
+        &self.command_input
     }
 
     pub fn get_string(&self,s:&TypeString) -> &String {
@@ -1094,7 +1141,7 @@ impl LogicState {
                         self.final_buffer[x+(y+(self.status_line as usize)*8)*SCREEN_WIDTH_USIZE]=15;
                     }
                 }
-                let s = &format!("Score {:3} out of {}       Sound : {}",self.get_var(&VAR_CURRENT_SCORE),self.get_var(&VAR_MAXIMUM_SCORE),"none");
+                let s = &format!("Score {:3} out of {}       Sound : {}",self.get_var(&VAR_CURRENT_SCORE),self.get_var(&VAR_MAXIMUM_SCORE),if self.get_flag(&FLAG_SOUND_ENABLED) {"on "} else {"off"});
                 Interpretter::display_text(resources, self, 0, self.status_line, s, 0, 15)
             }
         }
@@ -1112,11 +1159,17 @@ impl LogicState {
     }
 
     pub fn clear_key(&mut self,key:&TypeController) {
-        if let Some(controller) = self.controllers.get(&key.get_value()) {
+        if let Some(keys) = self.controllers.get(&key.get_value()) {
             let mut new_keys = [AgiKeyCodes::Enter;256];
             let mut new_cnt:usize=0;
             for a in 0..self.key_len {
-                if self.key_buffer[a]!=*controller {
+                let mut matched=false;
+                for key in keys {
+                    if self.key_buffer[a]==*key {
+                        matched=true;
+                    }
+                }
+                if !matched {
                     new_keys[new_cnt]=self.key_buffer[a];
                     new_cnt+=1;
                 }
@@ -1144,10 +1197,12 @@ impl LogicState {
     }
 
     pub fn is_controller_pressed(&self,key:&TypeController) -> bool {
-        if let Some(controller) = self.controllers.get(&key.get_value()) {
-            for a in 0..self.key_len {
-                if self.key_buffer[a]==*controller {
-                    return true;
+        if let Some(keys) = self.controllers.get(&key.get_value()) {
+            for key in keys {
+                for a in 0..self.key_len {
+                    if self.key_buffer[a]==*key {
+                        return true;
+                    }
                 }
             }
         }
@@ -1155,7 +1210,7 @@ impl LogicState {
     }
 
     pub fn set_controller(&mut self,c:&TypeController,keycode:&AgiKeyCodes) {
-        self.controllers.insert(c.get_value(), *keycode);
+        self.controllers.entry(c.get_value()).or_default().push(*keycode);
     }
 
 }
@@ -1186,9 +1241,34 @@ pub enum AgiKeyCodes {
     Down = 0x5000,
     Escape = 0x001B,
     Space = 0x0020,
-    Enter = 0x000D,
-    Tab = 0x0009,
-    Backspace = 0x0008,
+    Enter = 0xFF0D,
+    Backspace = 0xFF08,
+    AltA = 0x1E00,
+    AltB = 0x3000,
+    AltC = 0x2E00,
+    AltD = 0x2000,
+    AltE = 0x1200,
+    AltF = 0x2100,
+    AltG = 0x2200,
+    AltH = 0x2300,
+    AltI = 0x1700,
+    AltJ = 0x2400,
+    AltK = 0x2500,
+    AltL = 0x2600,
+    AltM = 0x3200,
+    AltN = 0x3100,
+    AltO = 0x1800,
+    AltP = 0x1900,
+    AltQ = 0x1000,
+    AltR = 0x1300,
+    AltS = 0x1F00,
+    AltT = 0x1400,
+    AltU = 0x1600,
+    AltV = 0x2F00,
+    AltW = 0x1100,
+    AltX = 0x2D00,
+    AltY = 0x1500,
+    AltZ = 0x2C00,
     A  = 0x0061,
     B  = 0x0062,
     C  = 0x0063,
@@ -1215,6 +1295,32 @@ pub enum AgiKeyCodes {
     X  = 0x0078,
     Y  = 0x0079,
     Z  = 0x007A,
+    CtrlA  = 0x0001,
+    CtrlB  = 0x0002,
+    CtrlC  = 0x0003,
+    CtrlD  = 0x0004,
+    CtrlE  = 0x0005,
+    CtrlF  = 0x0006,
+    CtrlG  = 0x0007,
+    CtrlH  = 0x0008,
+    CtrlI  = 0x0009,
+    CtrlJ  = 0x000A,
+    CtrlK  = 0x000B,
+    CtrlL  = 0x000C,
+    CtrlM  = 0x000D,
+    CtrlN  = 0x000E,
+    CtrlO  = 0x000F,
+    CtrlP  = 0x0010,
+    CtrlQ  = 0x0011,
+    CtrlR  = 0x0012,
+    CtrlS  = 0x0013,
+    CtrlT  = 0x0014,
+    CtrlU  = 0x0015,
+    CtrlV  = 0x0016,
+    CtrlW  = 0x0017,
+    CtrlX  = 0x0018,
+    CtrlY  = 0x0019,
+    CtrlZ  = 0x001A,
     _0 = 0x0030,
     _1 = 0x0031,
     _2 = 0x0032,
@@ -1235,7 +1341,10 @@ pub enum AgiKeyCodes {
     F8 = 0x4200,
     F9 = 0x4300,
     F10= 0x4400,
+    Minus = 0x002D,
+    Equals= 0x003D,
 }
+
 
 impl AgiKeyCodes {
     pub fn is_ascii(&self) -> bool {
@@ -1245,6 +1354,8 @@ impl AgiKeyCodes {
     pub fn get_ascii(&self) -> u8 {
         (u16::from(*self)&0xFF) as u8
     }
+
+    pub const TAB: AgiKeyCodes = AgiKeyCodes::CtrlI;    // Tab and CtrlI share the same code
 }
 
 pub struct Interpretter {
@@ -1254,7 +1365,6 @@ pub struct Interpretter {
     pub keys:Vec<AgiKeyCodes>,
     pub breakpoints:HashMap<LogicExecutionPosition,bool>,
     pub instruction_breakpoints:HashMap<&'static str,bool>,
-    pub command_input_string:String,
     pub started:u64     // 1/20 ticks since started, so seconds is divdide this by 20
 }
 
@@ -1268,10 +1378,11 @@ impl Interpretter {
             keys: Vec::new(),
             breakpoints: HashMap::new(),
             instruction_breakpoints: HashMap::new(),
-            command_input_string: String::new(),
             started:0,
         };
         i.state.set_var(&VAR_TIME_DELAY,2);
+        i.state.set_var(&VAR_FREE_PAGES,255);
+        i.state.set_var(&VAR_MONITOR_TYPE,3);   // EGA
         i.state.initialise_rooms(&i.resources.objects.objects);
         Interpretter::new_room(&i.resources,&mut i.state,0);
 
@@ -1364,6 +1475,12 @@ impl Interpretter {
 
         let mut resuming = !self.stack.is_empty();
         let mutable_state = &mut self.state;
+        if !resuming && mutable_state.menu_input {
+            println!("MENU");
+            return;
+        }
+
+
         let mutable_stack = &mut self.stack;
 
         // delay (increment time by delay for now, in future, we should actually delay!)
@@ -1375,12 +1492,13 @@ impl Interpretter {
         }
 
         if mutable_state.is_input_enabled() {
-            let (done,new_string) = command_input(mutable_state, self.command_input_string.clone(),20,&String::from(">"),&self.resources,0,mutable_state.input_line,15,0,false);    // not sure if attributes are affected for this
-            self.command_input_string = new_string;
-            if done && self.command_input_string.len()>0 {
+            let (done,new_string) = command_input(mutable_state, mutable_state.command_input.clone(),20,&String::from(">"),&self.resources,0,mutable_state.input_line,15,0,false);    // not sure if attributes are affected for this
+            mutable_state.command_input = new_string;
+            if done && mutable_state.command_input.len()>0 {
                 // parse and clear input string
-                parse_input_string(mutable_state, self.command_input_string.clone(), &self.resources);
-                self.command_input_string.clear();
+                parse_input_string(mutable_state, mutable_state.command_input.clone(), &self.resources);
+                mutable_state.previous_input=mutable_state.command_input.clone();
+                mutable_state.command_input.clear();
             }
         }
         
@@ -1424,7 +1542,6 @@ impl Interpretter {
             // If score has changed(var(3)) or sound has turned off/on (flag(9)), update status line
             //show VAR_CURRENT_SCORE out of VAR_MAXIMUM_SCORE .... SOUND ON/OFF
 
-            mutable_state.set_var(&VAR_FREE_PAGES,255);
             let mut since_started = self.started/20;
             let days = since_started/(60*60*24);
             since_started%=24*60*60;
@@ -1644,27 +1761,42 @@ impl Interpretter {
         new_string
     }
 
-    fn handle_window_request(resources:&GameResources,state:&mut LogicState,pc:&LogicExecutionPosition,m:String,x:u8,y:u8,w:u8) -> Option<LogicExecutionPosition> {
+    fn handle_window_with_key(resources:&GameResources,state:&mut LogicState,m:String,x:u8,y:u8,w:u8) -> Option<AgiKeyCodes> {
         if state.displayed != m {
             state.displayed = m.clone();
             Self::close_windows(resources, state);
         } 
         if !Self::is_window_open(state) {
             Self::display_window(resources, state, m.as_str(),x,y,w);
-            return Some(pc.user_input());
+            return None;
         } else {
-            // todo check dialog flag timer thing, for now, any key to exit
-            if !state.get_flag(&FLAG_LEAVE_WINDOW_OPEN) {
-                let key_pressed = state.is_key_pressed(&AgiKeyCodes::Enter) || state.is_key_pressed(&AgiKeyCodes::Escape);
-                state.clear_keys();
-                if key_pressed {
-                    Self::close_windows(resources, state);
+            let enter_pressed =state.is_key_pressed(&AgiKeyCodes::Enter);
+            let escape_pressed = state.is_key_pressed(&AgiKeyCodes::Escape);
+            state.clear_keys();
+            if enter_pressed || escape_pressed {
+                Self::close_windows(resources, state);
+                if enter_pressed {
+                    return Some(AgiKeyCodes::Enter);
                 } else {
-                    return Some(pc.user_input());
+                    return Some(AgiKeyCodes::Escape);
                 }
             } else {
-                println!("Leave Window Open @{} v21: {}",pc,state.get_var(&VAR_MESSAGE_WINDOW_TIMER));
+                return None;
             }
+        }
+    }
+
+    fn handle_window_request(resources:&GameResources,state:&mut LogicState,pc:&LogicExecutionPosition,m:String,x:u8,y:u8,w:u8) -> Option<LogicExecutionPosition> {
+
+        let result = Self::handle_window_with_key(resources, state, m, x, y, w);
+
+        if !state.get_flag(&FLAG_LEAVE_WINDOW_OPEN) {
+            match result {
+                None => return Some(pc.user_input()),
+                Some(_) => {},
+            }
+        } else {
+            println!("Leave Window Open @{} v21: {}",pc,state.get_var(&VAR_MESSAGE_WINDOW_TIMER));
         }
         state.set_flag(&FLAG_LEAVE_WINDOW_OPEN,false);
         state.set_var(&VAR_MESSAGE_WINDOW_TIMER,0);
@@ -1678,12 +1810,7 @@ impl Interpretter {
             ActionOperation::Sound((_num,flag)) => /* TODO RAGI  - for now, just pretend sound finished*/ {/*println!("TODO : Sound@{}",pc); */state.set_flag(flag,true);},
             ActionOperation::StopSound(()) => /* TODO RAGI - for now, since we complete sounds straight away, does nothing */ {/*println!("TODO : StopSound@{}",pc);*/},
             ActionOperation::SetGameID((m,)) => /* TODO RAGI - if needed */{let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetGameID@{} {:?}",pc,m);},
-            ActionOperation::SetMenu((m,)) => /* TODO RAGI */ { let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetMenu@{} {}",pc,m); },
-            ActionOperation::SetMenuMember((m,c)) => /* TODO RAGI */{ let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetMenuMember@{} {} {}",pc,m,state.get_controller(c)); },
-            ActionOperation::SubmitMenu(()) => /* TODO RAGI */ { println!("TODO : SubmitMenu@{}",pc)},
             ActionOperation::TraceInfo((num1,num2,num3)) => /* TODO RAGI */ { println!("TODO : TraceInfo@{} {} {} {}",pc,state.get_num(num1),state.get_num(num2),state.get_num(num3)); }
-            ActionOperation::DisableMember((c,)) => /* TODO RAGI */ println!("TODO : DisableMember@{} {}",pc, state.get_controller(c)),
-            ActionOperation::CancelLine(()) => /* TODO RAGI */ println!("TODO : CancelLine@{}",pc),
             ActionOperation::ShakeScreen((num,)) => /* TODO RAGI */ println!("TODO : ShakeScreen@{} {:?}",pc,num),
             ActionOperation::PrintAtV0((m,x,y,)) => /* TODO RAGI */ { let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : PrintAtV0@{} {} {},{}",pc,m,state.get_num(x),state.get_num(y)); },
             ActionOperation::Block((a,b,c,d)) => /* TODO RAGI */ { println!("TODO : Block@{} {},{},{},{}",pc,state.get_num(a),state.get_num(b),state.get_num(c),state.get_num(d)); },
@@ -1695,6 +1822,7 @@ impl Interpretter {
             ActionOperation::ReleaseKey(()) => /* TODO RAGI */ println!("TODO : ReleaseKey@{}",pc),
             ActionOperation::PushScript(()) => /* TODO RAGI */ println!("TODO : PushScript@{}",pc),
             ActionOperation::PopScript(()) => /* TODO RAGI */ println!("TODO : PopScript@{}",pc),
+            ActionOperation::InitJoy(()) => /* TODO RAGI */ println!("TODO: InitJoy@{}",pc),
 
 
             
@@ -1769,10 +1897,10 @@ impl Interpretter {
                     }
                 }
                 // Clear textbuffer on showpic
-                let start=0;
-                let end = PIC_HEIGHT_USIZE;
+                let start=(state.play_top as usize)*8;
+                let end = start+PIC_HEIGHT_USIZE;
                 let col = 255;
-                for y in start..=end {
+                for y in start..end {
                     for x in 0usize..SCREEN_WIDTH_USIZE {
                         state.text_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
                     }
@@ -2046,9 +2174,7 @@ impl Interpretter {
                 }
                 for x in c1..=c2 {
                     for y in r1..=r2 {
-                        if y+(state.play_top as usize)*8 < SCREEN_HEIGHT_USIZE {
-                            state.back_buffer[x+(y+(state.play_top as usize)*8)*SCREEN_WIDTH_USIZE] = col;
-                        }
+                        state.back_buffer[x+y*SCREEN_WIDTH_USIZE] = col;
                         state.text_buffer[x+y*SCREEN_WIDTH_USIZE] = 255;
                     }
                 }
@@ -2062,6 +2188,121 @@ impl Interpretter {
                 let status_line = state.get_num(c);
                 state.set_configure_screen(play_top, input_line, status_line);
             },
+            ActionOperation::Status(()) => {
+                if state.displayed != "STATUS" {
+                    state.displayed=String::from("STATUS");
+                    state.set_text_mode(true);
+                    state.text_buffer=[15u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
+                    state.clear_keys();
+
+                    Self::display_text(resources, state, 20-16/2, 0, &String::from("You are carrying:"), 0, 15);
+
+                    if state.get_flag(&FLAG_INVENTORY_SELECTION) {
+                        println!("TODO SELECTION");
+                        if state.get_var(&VAR_INVENTORY_SELECTED) != 0 {
+                            println!("TODO DEFAULT SELECTION");
+                        }
+                    }
+
+                    // list items in possession
+                    let mut num_found=0;
+                    for (idx,room) in state.item_location.into_iter().enumerate() {
+                        if room == 255 {
+                            if num_found&1 == 0 {
+                                Self::display_text(resources, state, 1,2+ num_found/2, &resources.objects.objects[idx].name, 0, 15);
+                            } else {
+                                Self::display_text(resources, state, (39-(resources.objects.objects[idx].name.len())) as u8, 2+num_found/2, &resources.objects.objects[idx].name, 0, 15);
+                            }
+                            num_found+=1;
+                        }
+                    }
+
+                    // nothing
+                    if num_found==0 {
+                        Self::display_text(resources, state, 20-6/2, 2, &String::from("Nothing"), 0, 15);
+                    }
+                }
+
+
+                if !state.is_key_pressed(&AgiKeyCodes::Enter) && !state.is_key_pressed(&AgiKeyCodes::Escape) {
+                    
+                    return Some(pc.user_input());
+                } else {
+                    if state.get_flag(&FLAG_INVENTORY_SELECTION) {
+                        if state.is_key_pressed(&AgiKeyCodes::Escape) {
+                            state.set_var(&VAR_INVENTORY_SELECTED,255);
+                        } else {
+                            println!("SELECTED ITEM NEEDS TO BE SET");
+                        }
+                    }
+                    
+                    state.displayed=String::new();
+                    state.set_text_mode(false);
+                    state.clear_keys();
+                }
+
+            },
+            ActionOperation::CancelLine(()) => state.command_input=String::from(""),
+            ActionOperation::QuitV0(()) => {
+                match Self::quit_check(resources,state,0) {
+                    Some(true) => exit(0),
+                    Some(false) => {},
+                    None => return Some(pc.user_input()),
+                }
+            },
+            ActionOperation::QuitV1((num,)) => {
+                match Self::quit_check(resources,state,state.get_num(num)) {
+                    Some(true) => exit(0),
+                    Some(false) => {},
+                    None => return Some(pc.user_input()),
+                }
+            },
+            ActionOperation::EchoLine(()) => {
+                if state.is_input_enabled() {
+                    let n=state.command_input.len();
+                    if state.previous_input.len()>n {
+                        state.command_input.push_str(&state.previous_input.as_str()[n..]);
+                    }
+                }
+            },
+            ActionOperation::ToggleMonitor(()) => {},   // No operation as we don't support CGA
+            ActionOperation::SetMenu((m,)) => {
+                if !state.menu_ready {
+                    let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m);
+                    for idx in 0..=255 {
+                        if state.menu[idx].name.len() == 0 {
+                            state.menu[idx].name = m.clone();
+                            break;
+                        }
+                    }
+                }
+            },
+            ActionOperation::SetMenuMember((m,c)) => { 
+                if !state.menu_ready {
+                    let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); 
+                    for idx in (0..=255).rev() {
+                        if state.menu[idx].name.len() != 0 {
+                            state.menu[idx].items.push(
+                                MenuItem { description: m.clone(), controller: *c, enabled: true }
+                            );
+                            break;
+                        }
+                    }
+                }
+            },
+            ActionOperation::SubmitMenu(()) => state.menu_ready=true,
+            ActionOperation::DisableMember((c,)) => {
+                for idx in 0..=255 {
+                    if state.menu[idx].name.len() != 0 {
+                        for item in state.menu[idx].items.iter_mut() {
+                            if item.controller.get_value()==c.get_value() {
+                                item.enabled=false;
+                            }
+                        }
+                    }
+                }
+            },
+            ActionOperation::MenuInput(()) => if state.get_flag(&FLAG_MENU_ENABLED) { state.menu_input=true; },
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
@@ -2069,6 +2310,18 @@ impl Interpretter {
         Some(pc.next())
     }
  
+    fn quit_check(resources:&GameResources,state:&mut LogicState,code:u8) -> Option<bool> {
+        if code == 1 {
+            Some(true)
+        } else {
+            match Self::handle_window_with_key(resources, state, String::from("Press ENTER to quit.\nPress ESC to keep playing."), 255, 255, 255) {
+                Some(AgiKeyCodes::Escape) => Some(false),
+                Some(AgiKeyCodes::Enter) => Some(true),
+                _ => None,
+            }
+        }
+    }
+
     pub fn render_glyph(resources:&GameResources,state:&mut LogicState,x:u16,y:u8,g:u8,ink:u8,paper:u8) {
         let s = resources.font.as_slice();
         let x = x as usize;
@@ -2725,7 +2978,6 @@ pub fn update_anims(resources:&GameResources,state:&mut LogicState) {
             if !state.object(&obj_num).fixed_loop {
                 let loops = get_loops(resources, state.object(&obj_num));
                 match loops.len() {
-                    0..=1 => {},    // Do nothing
                     2..=3 => {
                         let direction = state.object(&obj_num).get_direction();
                         match direction {
@@ -2735,7 +2987,7 @@ pub fn update_anims(resources:&GameResources,state:&mut LogicState) {
                             _ => panic!("direction not valid range for auto loop {}",direction),
                         }
                     },
-                    4..=7 => {
+                    4..=5 => {
                         let direction = state.object(&obj_num).get_direction();
                         match direction {
                             0 => {}, // Do nothing
@@ -2746,7 +2998,7 @@ pub fn update_anims(resources:&GameResources,state:&mut LogicState) {
                             _ => panic!("direction not valid range for auto loop {}",direction),
                         }
                     },
-                    _ => panic!("Unsupported loop count in auto loop {}",loops.len()),
+                    _ => {},    // Do nothing
                 }
             }
 
@@ -2953,9 +3205,10 @@ fn shuffle(state:&mut LogicState,_resources:&GameResources,obj:&TypeObject) {
     {
         state.mut_object(obj).request_shuffle=false;
         let s = state.object(obj);
-        let mut tx = s.get_x() as usize;
-        let mut ty = s.get_y() as usize;
-        let w = s.get_width() as usize;
+        let mut tx = s.get_x() as i16;
+        let mut ty = s.get_y() as i16;
+        let w = s.get_width() as i16;
+        let h = s.get_height() as i16;
 
         loop {
             let mut blocked=false;
@@ -2963,20 +3216,24 @@ fn shuffle(state:&mut LogicState,_resources:&GameResources,obj:&TypeObject) {
             let mut signal=false;
 
             // todo check position is on screen
-            // todo check collisions with objects
+            if tx<0 || ty<0 || tx+w>=(PIC_WIDTH_U8 as i16) || ty<h || ty>=(PIC_HEIGHT_U8 as i16) {
+                // out of bounds
+            } else {
+                // todo check collisions with objects
 
-            get_priority_status(state, tx, ty, w, &mut water, state.object(obj), &mut blocked, &mut signal);
-            let mut position_safe=true;
-            if s.restrict_to_water && !water {
-                position_safe=false;
-            } else if s.restrict_to_land && water {
-                position_safe=false;
-            } else if blocked {
-                position_safe=false;
-            }
+                get_priority_status(state, tx as usize, ty as usize, w as usize, &mut water, state.object(obj), &mut blocked, &mut signal);
+                let mut position_safe=true;
+                if s.restrict_to_water && !water {
+                    position_safe=false;
+                } else if s.restrict_to_land && water {
+                    position_safe=false;
+                } else if blocked {
+                    position_safe=false;
+                }
 
-            if position_safe {
-                break;
+                if position_safe {
+                    break;
+                }
             }
 
             match shuffle_state {
