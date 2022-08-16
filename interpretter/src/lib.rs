@@ -39,8 +39,9 @@ pub const VAR_DAYS:TypeVar = type_var_from_u8(14);
 pub const VAR_EGO_VIEW:TypeVar = type_var_from_u8(16);
 
 pub const VAR_CURRENT_KEY:TypeVar = type_var_from_u8(19);
-
+pub const VAR_COMPUTER_TYPE:TypeVar = type_var_from_u8(20);
 pub const VAR_MESSAGE_WINDOW_TIMER:TypeVar = type_var_from_u8(21);
+pub const VAR_SOUND_CHANNEL_COUNT:TypeVar = type_var_from_u8(22);
 
 pub const VAR_INVENTORY_SELECTED:TypeVar = type_var_from_u8(25);
 pub const VAR_MONITOR_TYPE:TypeVar = type_var_from_u8(26);
@@ -714,6 +715,7 @@ enum MenuDirection {
 pub struct LogicState {
     rng:ThreadRng,
     new_room:u8,
+    restart:bool,
     text_mode:bool,
     input:bool,
     ego_player_control:bool,
@@ -785,6 +787,7 @@ impl LogicState {
         LogicState {
             rng:rand::thread_rng(),
             new_room: 0,
+            restart:false,
             text_mode:false,
             input: false,
             ego_player_control: true,
@@ -1491,6 +1494,8 @@ impl Interpretter {
         };
         i.state.set_var(&VAR_TIME_DELAY,2);
         i.state.set_var(&VAR_FREE_PAGES,255);
+        i.state.set_var(&VAR_SOUND_CHANNEL_COUNT,1);
+        i.state.set_var(&VAR_COMPUTER_TYPE,0);
         i.state.set_var(&VAR_MONITOR_TYPE,3);   // EGA
         i.state.initialise_rooms(&i.resources.objects.objects);
         Interpretter::new_room(&i.resources,&mut i.state,0);
@@ -1554,7 +1559,8 @@ impl Interpretter {
                         if single_step {
                             return;
                         }
-                        if state.get_new_room()!=0 {
+                        if state.get_new_room()!=0 || state.restart {
+                            state.restart=false;
                             stack.clear();  // new_room short circuits the interpretter cycle
                         }
                         break;
@@ -2480,6 +2486,21 @@ impl Interpretter {
                     return Some(pc.user_input());
                 }
             },
+            ActionOperation::RestartGame(()) => {
+                // TODO check dialog flag 16 (auto restart)
+                let snd_state = state.get_flag(&FLAG_SOUND_ENABLED);
+                *state=LogicState::new();
+                state.initialise_rooms(&resources.objects.objects);
+                state.set_var(&VAR_TIME_DELAY,2);
+                state.set_var(&VAR_FREE_PAGES,255);
+                state.set_var(&VAR_SOUND_CHANNEL_COUNT,1);
+                state.set_var(&VAR_COMPUTER_TYPE,0);
+                state.set_var(&VAR_MONITOR_TYPE,3);   // EGA
+                state.set_flag(&FLAG_RESTART_GAME, true);
+                state.set_flag(&FLAG_SOUND_ENABLED,snd_state);
+                state.restart=true;
+                return None;
+            }
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
