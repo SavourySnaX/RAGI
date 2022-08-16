@@ -92,6 +92,10 @@ pub const fn type_object_from_u8(n:u8) -> TypeObject {
     TypeObject {value:n }
 }
 
+pub const fn type_string_from_u8(n:u8) -> TypeString {
+    TypeString {value:n }
+}
+
 pub const fn type_flag_from_u8(n:u8) -> TypeFlag {
     TypeFlag {value:n }
 }

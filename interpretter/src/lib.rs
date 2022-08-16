@@ -16,6 +16,8 @@ use words::Words;
 pub const SCREEN_WIDTH_USIZE:usize = 320;
 pub const SCREEN_HEIGHT_USIZE:usize = 200;
 
+pub const STRING_PROMPT:TypeString = type_string_from_u8(0);
+
 pub const OBJECT_EGO:TypeObject = type_object_from_u8(0);
 
 pub const VAR_CURRENT_ROOM:TypeVar = type_var_from_u8(0);
@@ -703,6 +705,11 @@ impl Menu {
         Menu {name:String::new(),items:Vec::new()}
     }
 }
+enum MenuDirection {
+    Forward,
+    Backward,
+    None,
+}
 
 pub struct LogicState {
     rng:ThreadRng,
@@ -737,6 +744,8 @@ pub struct LogicState {
 
     windows:[TextWindow;2], // Holds the co-ordinates of the message window last drawn (and item from show.obj)
     displayed:String,
+
+    selection_num:u8,
 
     //menus
     menu:[Menu;256],    // overkill
@@ -793,6 +802,7 @@ impl LogicState {
             num_string: String::from(""),
             command_input: String::from(""),
             previous_input: String::from(""),
+            selection_num: 0,
             prompt:'_',
             parsed_input_string: String::from(""),
             windows:[();2].map(|_| TextWindow::new()),
@@ -918,10 +928,6 @@ impl LogicState {
         }
 
         let mut expected=self.words_found;
-        if to_check.len()>expected {
-            return false;
-        }
-
         for (index,word) in to_check.iter().enumerate() {
             // Match any word, but out of words to match against
             if word.get_value() == 1 && self.words[index]==0 {
@@ -934,6 +940,9 @@ impl LogicState {
             }
             // Word does not match
             if word.get_value() != self.words[index] {
+                return false;
+            }
+            if expected==0 {
                 return false;
             }
             expected-=1;
@@ -1026,6 +1035,7 @@ impl LogicState {
 
     pub fn set_player_control(&mut self) {
         self.ego_player_control=true;
+        self.mut_object(&OBJECT_EGO).set_enable_motion(true);
     }
     
     pub fn set_program_control(&mut self) {
@@ -1234,6 +1244,84 @@ impl LogicState {
         self.controllers.entry(c.get_value()).or_default().push(*keycode);
     }
 
+    fn next_menu(&mut self,direction:MenuDirection) {
+        let mut last_menu=-1;
+        for n in 0u8..=255 {
+            let s = &self.menu[n as usize].name;
+            if s.len()==0 {
+                break;
+            }
+            last_menu=n as i16;
+        }
+
+        let original = self.menu_num as i16;
+        let mut current = self.menu_num as i16;
+
+        loop {
+            match direction {
+                MenuDirection::Forward => current+=1,
+                MenuDirection::Backward=> current-=1,
+                MenuDirection::None => {},
+            }
+
+            if current>last_menu {
+                current=0;
+            } else if current<0 {
+                current=last_menu;
+            }
+
+            if current == original {
+                break;
+            }
+
+            let mut valid=false;
+            for i in &self.menu[current as usize].items {
+                valid|=i.enabled;
+            }
+
+            if valid {
+                break;
+            }
+        }
+
+        self.menu_num=current as u8;
+        self.next_menu_item(MenuDirection::None);
+    }
+
+
+    fn next_menu_item(&mut self,direction:MenuDirection) {
+        let last_menu_item=(self.menu[self.menu_num as usize].items.len()-1) as i16;
+
+        let original = self.menu_item as i16;
+        let mut current = self.menu_item as i16;
+
+        loop {
+            match direction {
+                MenuDirection::Forward => current+=1,
+                MenuDirection::Backward=> current-=1,
+                MenuDirection::None => if current > last_menu_item { current=0 } else if !self.menu[self.menu_num as usize].items[current as usize].enabled {current+=1;},
+            }
+
+            if current>last_menu_item {
+                current=0;
+            } else if current<0 {
+                current=last_menu_item;
+            }
+
+            if current == original {
+                break;
+            }
+
+            if self.menu[self.menu_num as usize].items[current as usize].enabled {
+                break;
+            }
+
+        }
+
+        self.menu_item=current as u8;
+    }
+
+
 }
 
 impl fmt::Debug for LogicState {
@@ -1256,7 +1344,7 @@ impl fmt::Debug for LogicState {
 #[derive(FromToRepr,Clone, Copy, PartialEq)]
 #[repr(u16)]
 pub enum AgiKeyCodes {
-    Left = 0x4B00,
+    Left = 0x4B00, 
     Right = 0x4D00,
     Up = 0x4800,
     Down = 0x5000,
@@ -1497,14 +1585,6 @@ impl Interpretter {
         let mut resuming = !self.stack.is_empty();
         let mutable_state = &mut self.state;
         if !resuming && mutable_state.menu_input {
-            let mut last_menu=255;
-            for n in 0u8..=255 {
-                let s = mutable_state.menu[n as usize].name.clone();
-                if s.len()==0 {
-                    break;
-                }
-                last_menu=n;
-            }
             mutable_state.menu_buffer=[255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
             for y in 0..8 {
                 for x in 0..SCREEN_WIDTH_USIZE {
@@ -1522,14 +1602,12 @@ impl Interpretter {
                 }
             }
 
-            let last_item = (mutable_state.menu[mutable_state.menu_num as usize].items.len()-1) as u8;
-
             for k in &self.keys {
                 match k {
-                    AgiKeyCodes::Left => if mutable_state.menu_num>0 { mutable_state.menu_num-=1 } else { mutable_state.menu_num=last_menu },
-                    AgiKeyCodes::Right => if mutable_state.menu_num<last_menu { mutable_state.menu_num+=1 } else { mutable_state.menu_num=0 },
-                    AgiKeyCodes::Up => if mutable_state.menu_item>0 { mutable_state.menu_item-=1 } else { mutable_state.menu_item=last_item },
-                    AgiKeyCodes::Down => if mutable_state.menu_item<last_item { mutable_state.menu_item+=1 } else { mutable_state.menu_item=0 },
+                    AgiKeyCodes::Left => mutable_state.next_menu(MenuDirection::Backward),
+                    AgiKeyCodes::Right => mutable_state.next_menu(MenuDirection::Forward),
+                    AgiKeyCodes::Up => mutable_state.next_menu_item(MenuDirection::Backward),
+                    AgiKeyCodes::Down => mutable_state.next_menu_item(MenuDirection::Forward),
                     AgiKeyCodes::Escape => { mutable_state.menu_input=false; mutable_state.menu_has_key=false; },
                     AgiKeyCodes::Enter => { mutable_state.menu_input=false; mutable_state.menu_has_key=true; mutable_state.menu_key=mutable_state.menu[mutable_state.menu_num as usize].items[mutable_state.menu_item as usize].controller; },
                     _ => {},
@@ -1551,7 +1629,7 @@ impl Interpretter {
         }
 
         if mutable_state.is_input_enabled() {
-            let (done,new_string) = command_input(mutable_state, mutable_state.command_input.clone(),20,&String::from(">"),&self.resources,0,mutable_state.input_line,15,0,false);    // not sure if attributes are affected for this
+            let (done,new_string) = command_input(mutable_state, mutable_state.command_input.clone(),20,&mutable_state.get_string(&STRING_PROMPT).clone(),&self.resources,0,mutable_state.input_line,15,0,false);    // not sure if attributes are affected for this
             mutable_state.command_input = new_string;
             if done && mutable_state.command_input.len()>0 {
                 // parse and clear input string
@@ -2179,26 +2257,8 @@ impl Interpretter {
             },
             ActionOperation::ShowObj((num,)) => {
                 let v = state.get_num(num) as usize;
-                let view = &resources.views[&v];
-                let m = view.get_description();
-                if state.displayed != *m {
-                    state.displayed = m.clone();
-                    Self::close_windows(resources, state);
-                } 
-                if !Self::is_window_open(state) {
-                    Self::display_window(resources, state, m.as_str(),255,255,255);
-                    Self::display_obj(resources, state, view);
-
+                if !Self::show_object(resources, state, v) {
                     return Some(pc.user_input());
-                } else {
-                    // todo check dialog flag timer thing, for now, any key to exit
-                    let key_pressed = state.key_len>0;
-                    state.clear_keys();
-                    if key_pressed {
-                        Self::close_windows(resources, state);
-                    } else {
-                        return Some(pc.user_input());
-                    }
                 }
             },
             ActionOperation::CloseWindow(()) => {
@@ -2267,6 +2327,8 @@ impl Interpretter {
                 state.set_configure_screen(play_top, input_line, status_line);
             },
             ActionOperation::Status(()) => {
+                let selecting = state.get_flag(&FLAG_INVENTORY_SELECTION);
+
                 if state.displayed != "STATUS" {
                     state.displayed=String::from("STATUS");
                     state.set_text_mode(true);
@@ -2275,42 +2337,73 @@ impl Interpretter {
 
                     Self::display_text(resources, state, 20-16/2, 0, &String::from("You are carrying:"), 0, 15);
 
-                    if state.get_flag(&FLAG_INVENTORY_SELECTION) {
-                        println!("TODO SELECTION");
-                        if state.get_var(&VAR_INVENTORY_SELECTED) != 0 {
-                            println!("TODO DEFAULT SELECTION");
-                        }
-                    }
+                    state.selection_num=255;
+                }
 
-                    // list items in possession
-                    let mut num_found=0;
-                    for (idx,room) in state.item_location.into_iter().enumerate() {
-                        if room == 255 {
-                            if num_found&1 == 0 {
-                                Self::display_text(resources, state, 1,2+ num_found/2, &resources.objects.objects[idx].name, 0, 15);
-                            } else {
-                                Self::display_text(resources, state, (39-(resources.objects.objects[idx].name.len())) as u8, 2+num_found/2, &resources.objects.objects[idx].name, 0, 15);
-                            }
-                            num_found+=1;
+                // list items in possession
+                let mut num_found=0;
+                for (idx,room) in state.item_location.into_iter().enumerate() {
+                    if room == 255 {
+                        if state.selection_num==255 && idx == state.get_var(&VAR_INVENTORY_SELECTED) as usize {
+                            state.selection_num=num_found;
                         }
-                    }
-
-                    // nothing
-                    if num_found==0 {
-                        Self::display_text(resources, state, 20-6/2, 2, &String::from("Nothing"), 0, 15);
+                        let ink;
+                        let paper;
+                        if selecting && num_found==state.selection_num {
+                            ink=15;
+                            paper=0;
+                        } else {
+                            ink=0;
+                            paper=15;
+                        }
+                        if num_found&1 == 0 {
+                            Self::display_text(resources, state, 1,2+ num_found/2, &resources.objects.objects[idx].name, ink, paper);
+                        } else {
+                            Self::display_text(resources, state, (39-(resources.objects.objects[idx].name.len())) as u8, 2+num_found/2, &resources.objects.objects[idx].name, ink, paper);
+                        }
+                        num_found+=1;
                     }
                 }
 
+                if state.selection_num>num_found {
+                    state.selection_num=0;
+                }
 
-                if !state.is_key_pressed(&AgiKeyCodes::Enter) && !state.is_key_pressed(&AgiKeyCodes::Escape) {
-                    
+                // nothing
+                if num_found==0 {
+                    Self::display_text(resources, state, 20-6/2, 2, &String::from("Nothing"), 0, 15);
+                }
+
+                let mut done=AgiKeyCodes::Space;
+                for k in 0..state.key_len {
+                    match state.key_buffer[k] {
+                        AgiKeyCodes::Left => if selecting && state.selection_num>0 { state.selection_num-=1; },
+                        AgiKeyCodes::Right => if selecting && state.selection_num<num_found-1 { state.selection_num+=1; },
+                        AgiKeyCodes::Up => if selecting && state.selection_num>1 { state.selection_num-=2; },
+                        AgiKeyCodes::Down => if selecting && state.selection_num<num_found-2 { state.selection_num+=2; },
+                        AgiKeyCodes::Escape => { done=AgiKeyCodes::Escape; }
+                        AgiKeyCodes::Enter => { done=AgiKeyCodes::Enter; }
+                        _ => {},
+                    }
+                }
+
+                if done != AgiKeyCodes::Escape && done != AgiKeyCodes::Enter {
                     return Some(pc.user_input());
                 } else {
-                    if state.get_flag(&FLAG_INVENTORY_SELECTION) {
-                        if state.is_key_pressed(&AgiKeyCodes::Escape) {
+                    if selecting {
+                        if done==AgiKeyCodes::Escape {
                             state.set_var(&VAR_INVENTORY_SELECTED,255);
                         } else {
-                            println!("SELECTED ITEM NEEDS TO BE SET");
+                            let mut c=state.selection_num;
+                            for (idx,room) in state.item_location.into_iter().enumerate() {
+                                if room==255 {
+                                    if c==0 {
+                                        state.set_var(&VAR_INVENTORY_SELECTED, idx as u8);
+                                        break;
+                                    } 
+                                    c-=1;
+                                }
+                            }
                         }
                     }
                     
@@ -2381,6 +2474,12 @@ impl Interpretter {
                 }
             },
             ActionOperation::MenuInput(()) => if state.get_flag(&FLAG_MENU_ENABLED) { state.menu_input=true; },
+            ActionOperation::ShowObjV((var,)) => {
+                let v = state.get_var(var) as usize;
+                if !Self::show_object(resources, state, v) {
+                    return Some(pc.user_input());
+                }
+            },
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
@@ -2424,14 +2523,19 @@ impl Interpretter {
         let y=y*8;
         let m = &state.menu[menu as usize].items[item as usize];
         let s = &m.description;
+        let e=m.enabled;
         let ink:u8;
         let paper:u8;
         if item == state.menu_item {
             ink=15;
             paper=0;
         } else {
-            ink=0;
-            paper=15;
+            ink=if e {
+                0
+            } else {
+                7
+            };
+            paper = 15;
         }
         for l in s.as_bytes() {
             Self::render_glyph(resources, &mut state.menu_buffer, x, y, *l,ink,paper);
@@ -2636,6 +2740,31 @@ impl Interpretter {
         self.instruction_breakpoints.insert(operation.into(), temporary);
     }
 
+    fn show_object(resources: &GameResources, state: &mut LogicState, v:usize) -> bool {
+        let view = &resources.views[&v];
+        let m = view.get_description();
+        if state.displayed != *m {
+            state.displayed = m.clone();
+            Self::close_windows(resources, state);
+        }
+        if !Self::is_window_open(state) {
+            Self::display_window(resources, state, m.as_str(),255,255,255);
+            Self::display_obj(resources, state, view);
+
+            return false;
+        } else {
+            if state.is_key_pressed(&AgiKeyCodes::Enter) || state.is_key_pressed(&AgiKeyCodes::Escape) {
+                state.clear_keys();
+                Self::close_windows(resources, state);
+            } else {
+                state.clear_keys();
+                return false;
+            }
+        }
+        true
+    }
+
+
 }
 
 pub fn parse_input_string(state: &mut LogicState, s: String, resources: &GameResources) {
@@ -2703,7 +2832,7 @@ pub fn command_input(state: &mut LogicState, s: String, max_length: usize, m: &S
     
     // Go through keyboard buffer and append/remove keys?
     let to_show = m.clone()+new_string.as_str()+state.get_prompt().to_string().as_str();
-    let indent_len = if max_length+1<new_string.len() { 0 } else {(max_length+1) - new_string.len()};
+    let indent_len = if max_length<new_string.len() { 0 } else {(max_length) - new_string.len()};
     let to_show = to_show + format!("{:indent$}","",indent=indent_len).as_str();
     Interpretter::display_text(resources, state, x, y, &to_show,ink,paper);
     // pull keycodes off 
@@ -3353,8 +3482,8 @@ fn shuffle(state:&mut LogicState,_resources:&GameResources,obj:&TypeObject) {
             let mut water=true;
             let mut signal=false;
 
-            // todo check position is on screen
-            if tx<0 || ty<0 || tx+w>=(PIC_WIDTH_U8 as i16) || ty<h || ty>=(PIC_HEIGHT_U8 as i16) {
+            // todo check position is on screen (technically allows pixels on 161, but breaks LL1 cab if we fix the test)
+            if tx<0 || ty<0 || tx+w>(PIC_WIDTH_U8 as i16) || ty<h || ty>=(PIC_HEIGHT_U8 as i16) {
                 // out of bounds
             } else {
                 // todo check collisions with objects
