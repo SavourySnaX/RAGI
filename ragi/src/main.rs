@@ -18,11 +18,11 @@ const KQ1:bool=false;
 const KQ2:bool=false;
 const KQ3:bool=false;
 const KQ4:bool=false;
-const LL1:bool=true;
+const LL1:bool=false;
 const SQ1:bool=false;
 const SQ2:bool=false;
 const SQ2_F:bool=false;
-const GR:bool =false;
+const GR:bool =true;
 const BC:bool =false;
 const MH1:bool = false;
 
@@ -66,7 +66,7 @@ fn main() -> Result<(), String> {
     } else if SQ1 {
         interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/","2.089").unwrap();
         //interpretter.set_breakpoint(5,54,false);
-        interpretter.set_breakpoint_on_instruction(&ActionOperation::Draw((type_object_from_u8(1),)), false);
+        //interpretter.set_breakpoint_on_instruction(&ActionOperation::Draw((type_object_from_u8(1),)), false);
     } else if SQ2 {
         interpretter=Interpretter::new("../images/Space Quest II- Chapter II - Vohaul's Revenge v2.0C (1987)(Sierra On-Line, Inc.) [Adventure]/","2.917").unwrap();
         interpretter.set_breakpoint(2,147,true);
@@ -78,9 +78,10 @@ fn main() -> Result<(), String> {
         interpretter.set_breakpoint(1,1,true);
     } else if BC {
         interpretter=Interpretter::new("../images/Black Cauldron, The v2.10 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.098").unwrap();
+        interpretter.set_breakpoint(0,0,true);
     } else if MH1 {
         interpretter=Interpretter::new("../images/Manhunter- New York v1.22 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.102").unwrap();
-        interpretter.set_breakpoint(0,0,true);
+        interpretter.set_breakpoint(153,150,true);
     } else {
         panic!("NO GAME SET");
     }

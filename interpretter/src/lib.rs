@@ -784,7 +784,8 @@ impl AgiRandom {
             self.rnd_seed = rand::thread_rng().gen_range(1u16..=65535)+1;
         }
         self.rnd_seed = ((self.rnd_seed.wrapping_mul(0x7C4D))%65535)+1;
-        range.start().wrapping_add((self.rnd_seed%((range.end()-range.start()+1)as u16)) as u8)
+        let mod_range = (range.end()-range.start()) as u16 + 1;
+        range.start().wrapping_add((self.rnd_seed%mod_range)as u8)
     }
 }
 
@@ -2639,6 +2640,20 @@ impl Interpretter {
             }
             ActionOperation::SetGameID((m,)) => {
                 state.game_id=Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m);
+            },
+            ActionOperation::OverlayPic((var,)) => {
+                let n = state.get_var(var); 
+                let mut pic = [0u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE];
+                let mut pri = [4u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE];
+                for i in 0..PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE {
+                    pic[i]=state.picture_buffer[i];
+                    pri[i]=state.priority_buffer[i];
+                }
+                let r = resources.pictures[&usize::from(n)].render_onto(&mut pic,&mut pri);
+                if r.is_ok() {
+                    state.picture_buffer.copy_from_slice(&pic);
+                    state.priority_buffer.copy_from_slice(&pri);
+                }
             },
 
             _ => panic!("TODO {:?}:{:?}",pc,action),

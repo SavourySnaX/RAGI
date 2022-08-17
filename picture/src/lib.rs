@@ -27,9 +27,7 @@ impl PictureResource {
         Ok(PictureResource { picture_data, compressed })
     }
 
-    pub fn render_to(&self,picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE]) -> Result<(), String> {
-        *picture = [15u8;(PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE) as usize];
-        *priority = [4u8;(PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE) as usize];
+    pub fn render_onto(&self,picture:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],priority:&mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE]) -> Result<(), String> {
         let mut iter = PictureIterator::new(&self.picture_data,self.compressed);
         draw_picture(&mut iter,picture,priority)?;
         Ok(())
