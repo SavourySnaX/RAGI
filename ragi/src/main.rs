@@ -59,9 +59,10 @@ fn main() -> Result<(), String> {
         //interpretter.set_breakpoint_on_instruction(&ActionOperation::Draw((type_object_from_u8(1),)), false);
         //interpretter.set_breakpoint_on_instruction(&ActionOperation::AddToPic((type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),type_num_from_u8(0),)), false);
         //interpretter.set_breakpoint_on_instruction(&ActionOperation::MenuInput(()), false);
+        //interpretter.set_breakpoint(0,153,true);
 
         //cheat bypass questions
-        interpretter.state.set_flag(&TypeFlag::from(109),true);
+        //interpretter.state.set_flag(&TypeFlag::from(110),true);
     } else if SQ1 {
         interpretter=Interpretter::new("../images/Space Quest- The Sarien Encounter v1.0X (1986)(Sierra On-Line, Inc.) [Adventure]/","2.089").unwrap();
         //interpretter.set_breakpoint(5,54,false);

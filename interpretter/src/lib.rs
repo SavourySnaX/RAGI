@@ -822,6 +822,7 @@ pub struct LogicState {
     previous_input:String,
     prompt:char,
     parsed_input_string:String,
+    game_id:String,
 
     ink:u8,     // colours for display/get_string/get_num
     paper:u8,
@@ -901,6 +902,7 @@ impl LogicState {
             selection_num: 0,
             prompt:'_',
             parsed_input_string: String::from(""),
+            game_id: String::from(""),
             windows:[();2].map(|_| TextWindow::new()),
             displayed: String::from(""),
             ink:15,
@@ -1241,22 +1243,20 @@ impl LogicState {
         &self.final_buffer
     }
 
+    pub fn render_status(&mut self,resources:&GameResources) {
+        if self.status_visible {
+            let s = &format!("Score:{:3} of {}               Sound:{}",self.get_var(&VAR_CURRENT_SCORE),self.get_var(&VAR_MAXIMUM_SCORE),if self.get_flag(&FLAG_SOUND_ENABLED) {"on "} else {"off"});
+            Interpretter::display_status(resources, self, 0, self.status_line, s, 0, 15);
+        }
+    }
+
     pub fn render_final_buffer(&mut self,resources:&GameResources) {
         if self.text_mode {
-            self.final_buffer.copy_from_slice(&[0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]);
+            let p=self.get_paper();
+            self.final_buffer.copy_from_slice(&[p;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]);
         } else {
             self.final_buffer.copy_from_slice(&self.post_sprites);
-
-            if self.status_visible {
-                // Render Status Line (just a white bar for now)
-                for y in 0..8 {
-                    for x in 0..SCREEN_WIDTH_USIZE {
-                        self.final_buffer[x+(y+(self.status_line as usize)*8)*SCREEN_WIDTH_USIZE]=15;
-                    }
-                }
-                let s = &format!("Score {:3} out of {}       Sound : {}",self.get_var(&VAR_CURRENT_SCORE),self.get_var(&VAR_MAXIMUM_SCORE),if self.get_flag(&FLAG_SOUND_ENABLED) {"on "} else {"off"});
-                Interpretter::display_text(resources, self, 0, self.status_line, s, 0, 15)
-            }
+            self.render_status(resources);
         }
 
         // Now combine the text buffer
@@ -1330,7 +1330,6 @@ impl LogicState {
         }
         if self.menu_has_key {
             if key.get_value() == self.menu_key.get_value() {
-                self.menu_has_key=false;
                 return true;
             }
         }
@@ -1629,6 +1628,7 @@ impl Interpretter {
                 resume=false;
                 match Interpretter::interpret_instructions(resources,state,&exec,actions,logic_sequence) {
                     Some(newpc) => {
+                        let stack_pos = state.stack.len()-1;    // reload stack position, in case a restore occured
                         if newpc.is_input_request() {
                             state.stack[stack_pos]=newpc;
                             return;
@@ -1718,7 +1718,7 @@ impl Interpretter {
         } 
 
         // delay (increment time by delay for now, in future, we should actually delay!)
-        self.started+=(mutable_state.get_var(&VAR_TIME_DELAY)+1) as u64;
+        self.started+=1;//(mutable_state.get_var(&VAR_TIME_DELAY)+1) as u64;
 
         if !resuming {
             mutable_state.set_flag(&FLAG_COMMAND_ENTERED, false);
@@ -1736,8 +1736,11 @@ impl Interpretter {
             }
         }
         
-        // poll keyb/joystick
-        mutable_state.clear_keys();
+        if !resuming {
+            // poll keyb/joystick
+            mutable_state.clear_keys();
+        }
+
         for k in &self.keys {
             if k.is_ascii() {
                 mutable_state.set_var(&VAR_CURRENT_KEY,k.get_ascii());
@@ -1818,6 +1821,7 @@ impl Interpretter {
             mutable_state.set_flag(&FLAG_ROOM_FIRST_TIME, false);
             mutable_state.set_flag(&FLAG_RESTART_GAME, false);
             mutable_state.set_flag(&FLAG_RESTORE_GAME, false);
+            mutable_state.menu_has_key=false;
             // update all controlled objects on screen
             // if new room issued, rerun logic
             if mutable_state.get_new_room()!=0 {
@@ -1845,7 +1849,7 @@ impl Interpretter {
             ConditionOperation::Has((item,)) => state.get_item_room(item)==255,
             ConditionOperation::ObjInRoom((item,var)) => { let n=state.get_var(var); state.get_item_room(item)==n },
             ConditionOperation::Posn((obj,num1,num2,num3,num4)) => is_left_edge_in_box(resources,state,obj,num1,num2,num3,num4),
-            ConditionOperation::Controller((key,)) => { let pressed=state.is_controller_pressed(key); state.clear_key(key); pressed },
+            ConditionOperation::Controller((key,)) => { let pressed=state.is_controller_pressed(key); /*state.clear_key(key);*/ pressed },
             ConditionOperation::HaveKey(_) => {
                 // Can lock up completely as often used like so :
                 //recheck:
@@ -1969,9 +1973,9 @@ impl Interpretter {
         // score<- var 3
     }
 
-    fn append_expansion_to_message(state:&LogicState,resources:&GameResources,file:usize,new_string:&mut String,num:u8,n_kind:u8) {
+    fn append_expansion_to_message(state:&LogicState,resources:&GameResources,file:usize,new_string:&mut String,num:u8,wid:u8,n_kind:u8) {
         new_string.push_str(match n_kind {
-            b'v' => state.get_var(&TypeVar::from(num)).to_string(),
+            b'v' => format!("{:0wid$}",state.get_var(&TypeVar::from(num)), wid=wid as usize),
             b'm' => Interpretter::decode_message_from_resource(state, resources, file, &TypeMessage::from(num)),
             b'o' => resources.objects.objects[num as usize].name.clone(),
             b'w' => state.get_parsed_word_num(num),
@@ -1981,37 +1985,61 @@ impl Interpretter {
         }.as_str());
     }
 
-    fn decode_message_from_resource(state:&LogicState,resources:&GameResources,file:usize,message:&TypeMessage) -> String {
+    fn decode_message_from_string(state:&LogicState,resources:&GameResources,file:usize,m:&String) -> String {
         let mut new_string=String::from("");
         let mut c_state = 0;
         let mut n_kind = b' ';
         let mut num = 0;
-        let m = &resources.logic[&file].get_logic_messages().strings[state.get_message(message) as usize];
+        let mut wid = 0;
         let b = m.bytes();
         for c in b {
             match c_state {
                 0 => if c == b'%' { c_state=1; } else { new_string.push(c as char); },
                 1 => match c {
-                    b'v' | b'm' | b'o' | b'w' | b's' | b'g'  => { n_kind=c; num=0; c_state=2; },
+                    b'v' | b'm' | b'o' | b'w' | b's' | b'g'  => { n_kind=c; num=0; wid=0; c_state=2; },
                     _ => todo!(),
                 },
                 2 => if c>=b'0' && c<=b'9' { num*=10; num+=c-b'0'; } else 
                 {
-                    Self::append_expansion_to_message(state, resources, file, &mut new_string,num,n_kind);
+                    if c==b'|' && n_kind==b'v' {
+                        c_state=3;
+                    } else {
+                        Self::append_expansion_to_message(state, resources, file, &mut new_string,num,wid,n_kind);
+                        if c==b'%' {  // TODO '|'
+                            c_state=1;
+                        } else {
+                            new_string.push(c as char); 
+                            c_state=0;
+                        }
+                    }
+                },
+                3 => if c>=b'0' && c<=b'9' { wid*=10; wid+=c-b'0'; } else 
+                {
+                    Self::append_expansion_to_message(state, resources, file, &mut new_string,num,wid,n_kind);
                     if c==b'%' {  // TODO '|'
                         c_state=1;
                     } else {
-                        new_string.push(c as char); c_state=0;
+                        new_string.push(c as char); 
+                        c_state=0;
                     }
-                }
+                },
+
                 _ => todo!(),
             }
         }
         if c_state == 2 {
             // Deal with the case where the number is at the end of the string
-            Self::append_expansion_to_message(state, resources, file, &mut new_string,num,n_kind);
+            Self::append_expansion_to_message(state, resources, file, &mut new_string,num,wid,n_kind);
+        }
+        if c_state == 3 {
+            // Deal with the case where the number is at the end of the string
+            Self::append_expansion_to_message(state, resources, file, &mut new_string,num,wid,n_kind);
         }
         new_string
+    }
+
+    fn decode_message_from_resource(state:&LogicState,resources:&GameResources,file:usize,message:&TypeMessage) -> String {
+        Self::decode_message_from_string(state,resources,file,&resources.logic[&file].get_logic_messages().strings[state.get_message(message) as usize])
     }
 
     fn handle_window_with_key(resources:&GameResources,state:&mut LogicState,m:String,x:u8,y:u8,w:u8) -> Option<AgiKeyCodes> {
@@ -2062,7 +2090,6 @@ impl Interpretter {
             // Not complete
             ActionOperation::Sound((_num,flag)) => /* TODO RAGI  - for now, just pretend sound finished*/ {/*println!("TODO : Sound@{}",pc); */state.set_flag(flag,true);},
             ActionOperation::StopSound(()) => /* TODO RAGI - for now, since we complete sounds straight away, does nothing */ {/*println!("TODO : StopSound@{}",pc);*/},
-            ActionOperation::SetGameID((m,)) => /* TODO RAGI - if needed */{let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : SetGameID@{} {:?}",pc,m);},
             ActionOperation::TraceInfo((num1,num2,num3)) => /* TODO RAGI */ { println!("TODO : TraceInfo@{} {} {} {}",pc,state.get_num(num1),state.get_num(num2),state.get_num(num3)); }
             ActionOperation::ShakeScreen((num,)) => /* TODO RAGI */ println!("TODO : ShakeScreen@{} {:?}",pc,num),
             ActionOperation::PrintAtV0((m,x,y,)) => /* TODO RAGI */ { let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); println!("TODO : PrintAtV0@{} {} {},{}",pc,m,state.get_num(x),state.get_num(y)); },
@@ -2360,7 +2387,7 @@ impl Interpretter {
             },
             ActionOperation::ShowObj((num,)) => {
                 let v = state.get_num(num) as usize;
-                if !Self::show_object(resources, state, v) {
+                if !Self::show_object(resources, state, pc.get_logic(), v) {
                     return Some(pc.user_input());
                 }
             },
@@ -2579,7 +2606,7 @@ impl Interpretter {
             ActionOperation::MenuInput(()) => if state.get_flag(&FLAG_MENU_ENABLED) { state.menu_input=true; },
             ActionOperation::ShowObjV((var,)) => {
                 let v = state.get_var(var) as usize;
-                if !Self::show_object(resources, state, v) {
+                if !Self::show_object(resources, state, pc.get_logic(), v) {
                     return Some(pc.user_input());
                 }
             },
@@ -2602,15 +2629,17 @@ impl Interpretter {
                 let stack_pos = state.stack.len()-1;
                 state.stack[stack_pos]=*pc;    // ensure stack is positioned correctly for resume
                 let data = bincode::serialize(state).unwrap();
-                fs::write("../save_test.bin",data).unwrap();
+                fs::write(format!("../{}SG.1",state.game_id).as_str(),data).unwrap();
             },
             ActionOperation::RestoreGame(()) => {
-
-                let data = fs::read("../save_test.bin").unwrap();
+                let data = fs::read(format!("../{}SG.1",state.game_id).as_str()).unwrap();
                 *state=bincode::deserialize(&data).unwrap();
                 let stack_pos = state.stack.len()-1;
                 return Some(state.stack[stack_pos].next());
             }
+            ActionOperation::SetGameID((m,)) => {
+                state.game_id=Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m);
+            },
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
         }
@@ -2724,6 +2753,15 @@ impl Interpretter {
                 Self::render_glyph(resources, &mut state.text_buffer, x, y, *l,ink,paper);
                 x+=8;
             }
+        }
+    }
+
+    pub fn display_status(resources:&GameResources,state:&mut LogicState,x:u8,y:u8,s:&String,ink:u8,paper:u8) {
+        let mut x = (x as u16)*8;
+        let y=y*8;
+        for l in s.as_bytes() {
+            Self::render_glyph(resources, &mut state.final_buffer, x, y, *l,ink,paper);
+            x+=8;
         }
     }
 
@@ -2871,9 +2909,10 @@ impl Interpretter {
         self.instruction_breakpoints.insert(operation.into(), temporary);
     }
 
-    fn show_object(resources: &GameResources, state: &mut LogicState, v:usize) -> bool {
+    fn show_object(resources: &GameResources, state: &mut LogicState, logic:usize, v:usize) -> bool {
         let view = &resources.views[&v];
         let m = view.get_description();
+        let m = Interpretter::decode_message_from_string(state, resources, logic, m); 
         if state.displayed != *m {
             state.displayed = m.clone();
             Self::close_windows(resources, state);
