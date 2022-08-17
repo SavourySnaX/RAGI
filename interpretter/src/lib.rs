@@ -9,6 +9,7 @@ use logic::*;
 use objects::{Objects, Object};
 use picture::*;
 use rand::{rngs::ThreadRng, Rng};
+use serde::{Deserialize, Serialize, Serializer, Deserializer};
 use view::{ViewResource, ViewLoop, ViewCel};
 use volume::Volume;
 use words::Words;
@@ -64,7 +65,39 @@ pub const FLAG_LEAVE_WINDOW_OPEN:TypeFlag = type_flag_from_u8(15);
 type FP16=FixedU16<U8>;
 type FP32=FixedI32<U8>;
 
+fn serialize_type_controller<S>(element:&TypeController, serializer: S) -> Result<S::Ok, S::Error>
+where S : Serializer {
+    element.get_value().serialize(serializer)
+}
+
+fn deserialize_type_controller<'de, D>(deserializer: D) -> Result<TypeController, D::Error>
+where D : Deserializer<'de> {
+    Ok(TypeController::from(u8::deserialize(deserializer)?))
+}
+
+fn serialize_type_flag<S>(element:&TypeFlag, serializer: S) -> Result<S::Ok, S::Error>
+where S : Serializer {
+    element.get_value().serialize(serializer)
+}
+
+fn deserialize_type_flag<'de, D>(deserializer: D) -> Result<TypeFlag, D::Error>
+where D : Deserializer<'de> {
+    Ok(TypeFlag::from(u8::deserialize(deserializer)?))
+}
+
+fn serialize_fp16<S>(element:&FP16, serializer: S) -> Result<S::Ok, S::Error>
+where S : Serializer {
+    element.to_bits().serialize(serializer)
+}
+
+fn deserialize_fp16<'de, D>(deserializer: D) -> Result<FP16, D::Error>
+where D : Deserializer<'de> {
+    Ok(FP16::from_bits(u16::deserialize(deserializer)?))
+}
+
+
 #[derive(Debug)]
+#[derive(Serialize,Deserialize)]
 pub enum SpriteMotion {
     Normal,
     Wander,
@@ -73,6 +106,7 @@ pub enum SpriteMotion {
 }
 
 #[derive(Debug)]
+#[derive(Serialize,Deserialize)]
 pub enum SpriteCycle {
     Normal,
     Reverse,
@@ -81,6 +115,7 @@ pub enum SpriteCycle {
 }
 
 #[derive(Debug)] // TODO revisit copy
+#[derive(Serialize,Deserialize)]
 pub struct Sprite {
     active:bool,        // object is processed
     request_shuffle:bool,   // object requires a shuffle
@@ -110,16 +145,34 @@ pub struct Sprite {
     render_cel:u8,
     render_width:u8,
     render_height:u8,
+    #[serde(serialize_with = "serialize_fp16")]
+    #[serde(deserialize_with = "deserialize_fp16")]
     x:FP16,           // bottom left corner
+    #[serde(serialize_with = "serialize_fp16")]
+    #[serde(deserialize_with = "deserialize_fp16")]
     y:FP16,
     priority:u8,
+    #[serde(serialize_with = "serialize_type_flag")]
+    #[serde(deserialize_with = "deserialize_type_flag")]
     cycle_flag:TypeFlag,
+    #[serde(serialize_with = "serialize_type_flag")]
+    #[serde(deserialize_with = "deserialize_type_flag")]
     move_flag:TypeFlag,
+    #[serde(serialize_with = "serialize_fp16")]
+    #[serde(deserialize_with = "deserialize_fp16")]
     move_step:FP16,
+    #[serde(serialize_with = "serialize_fp16")]
+    #[serde(deserialize_with = "deserialize_fp16")]
     wander_distance:FP16,
     follow_distance:u8,
+    #[serde(serialize_with = "serialize_fp16")]
+    #[serde(deserialize_with = "deserialize_fp16")]
     ex:FP16,
+    #[serde(serialize_with = "serialize_fp16")]
+    #[serde(deserialize_with = "deserialize_fp16")]
     ey:FP16,
+    #[serde(serialize_with = "serialize_fp16")]
+    #[serde(deserialize_with = "deserialize_fp16")]
     step_size:FP16,
     step_time:u8,
     step_cnt:u8,
@@ -673,6 +726,7 @@ impl GameResources {
     }
 }
 
+#[derive(Serialize,Deserialize)]
 pub struct TextWindow {
     pub x0:u16,
     pub x1:u16,
@@ -690,12 +744,16 @@ impl TextWindow {
     }
 }
 
+#[derive(Serialize,Deserialize)]
 pub struct MenuItem {
     description:String,
+    #[serde(serialize_with = "serialize_type_controller")]
+    #[serde(deserialize_with = "deserialize_type_controller")]
     controller:TypeController,
     enabled:bool,
 }
 
+#[derive(Serialize,Deserialize)]
 pub struct Menu {
     name:String,
     items:Vec<MenuItem>,
@@ -712,7 +770,9 @@ enum MenuDirection {
     None,
 }
 
+#[derive(Serialize,Deserialize)]
 pub struct LogicState {
+    #[serde(skip)]  // TODO FIX?
     rng:ThreadRng,
     new_room:u8,
     restart:bool,
@@ -721,14 +781,22 @@ pub struct LogicState {
     ego_player_control:bool,
     status_visible:bool,
     horizon:u8,
+    #[serde(with = "serde_arrays")]
     flag:[bool;256],
+    #[serde(with = "serde_arrays")]
     var:[u8;256],
+    #[serde(with = "serde_arrays")]
     objects:[Sprite;256],   // overkill, for now, add.to.pics start at 255 and grow down, todo add list of active
+    #[serde(with = "serde_arrays")]
     string:[String;256],    // overkill
+    #[serde(with = "serde_arrays")]
     words:[u16;256],        // overkill
+    #[serde(with = "serde_arrays")]
     words_offsets:[usize;256],
     words_found:usize,
+    #[serde(with = "serde_arrays")]
     logic_start:[usize;256],
+    #[serde(with = "serde_arrays")]
     item_location:[u8;256],
 
     num_string:String,
@@ -744,34 +812,49 @@ pub struct LogicState {
     input_line: u8,
     status_line: u8,
 
+    #[serde(with = "serde_arrays")]
     windows:[TextWindow;2], // Holds the co-ordinates of the message window last drawn (and item from show.obj)
     displayed:String,
 
     selection_num:u8,
 
     //menus
+    #[serde(with = "serde_arrays")]
     menu:[Menu;256],    // overkill
     menu_ready:bool,
     menu_input:bool,
     menu_num:u8,
     menu_item:u8,
     menu_has_key:bool,
+    #[serde(serialize_with = "serialize_type_controller")]
+    #[serde(deserialize_with = "deserialize_type_controller")]
     menu_key:TypeController,
 
     //input
     controllers:HashMap<u8,Vec<AgiKeyCodes>>,
     key_len:usize,
+    #[serde(with = "serde_arrays")]
     key_buffer:[AgiKeyCodes;256],
 
+    pub stack:Vec<LogicExecutionPosition>,  // to fix needs accessor
+
+
     // video
+    #[serde(with = "serde_arrays")]
     picture_buffer:[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
+    #[serde(with = "serde_arrays")]
     priority_buffer:[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
 
+    #[serde(with = "serde_arrays")]
     back_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+    #[serde(with = "serde_arrays")]
     post_sprites:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
 
+    #[serde(with = "serde_arrays")]
     text_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+    #[serde(with = "serde_arrays")]
     menu_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+    #[serde(with = "serde_arrays")]
     final_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
 }
 
@@ -815,6 +898,7 @@ impl LogicState {
             play_top: 0,
             input_line: 21,
             status_line: 23,
+            stack: Vec::new(),
             menu: [();256].map(|_| Menu::new()),
             menu_ready: false,
             menu_input: false,
@@ -1345,6 +1429,7 @@ impl fmt::Debug for LogicState {
 }
 
 #[derive(FromToRepr,Clone, Copy, PartialEq)]
+#[derive(Serialize,Deserialize)]
 #[repr(u16)]
 pub enum AgiKeyCodes {
     Left = 0x4B00, 
@@ -1473,7 +1558,6 @@ impl AgiKeyCodes {
 pub struct Interpretter {
     pub resources:GameResources,
     pub state:LogicState,
-    pub stack:Vec<LogicExecutionPosition>,
     pub keys:Vec<AgiKeyCodes>,
     pub breakpoints:HashMap<LogicExecutionPosition,bool>,
     pub instruction_breakpoints:HashMap<&'static str,bool>,
@@ -1486,7 +1570,6 @@ impl Interpretter {
         let mut i = Interpretter {
             resources,
             state: LogicState::new(),
-            stack: Vec::new(),
             keys: Vec::new(),
             breakpoints: HashMap::new(),
             instruction_breakpoints: HashMap::new(),
@@ -1504,14 +1587,14 @@ impl Interpretter {
     }
 
     pub fn is_paused(&self) -> bool {
-        !self.stack.is_empty() && !self.stack[self.stack.len()-1].is_input_request()
+        !self.state.stack.is_empty() && !self.state.stack[self.state.stack.len()-1].is_input_request()
     }
 
-    pub fn do_call(breakpoints:&mut HashMap<LogicExecutionPosition,bool>,instruction_breakpoints:&mut HashMap<&'static str,bool>,resources:&GameResources,stack:&mut Vec<LogicExecutionPosition>,state:&mut LogicState, logics:&HashMap<usize,LogicResource>,resume:bool,single_step:bool) {
+    pub fn do_call(breakpoints:&mut HashMap<LogicExecutionPosition,bool>,instruction_breakpoints:&mut HashMap<&'static str,bool>,resources:&GameResources,state:&mut LogicState, logics:&HashMap<usize,LogicResource>,resume:bool,single_step:bool) {
         let mut resume = resume || single_step;
-        while !stack.is_empty() {
-            let stack_pos = stack.len()-1;
-            let entry = stack[stack_pos];
+        while !state.stack.is_empty() {
+            let stack_pos = state.stack.len()-1;
+            let entry = state.stack[stack_pos];
             let logic_sequence = logics[&entry.get_logic()].get_logic_sequence();
             let actions = logic_sequence.get_operations();
             let mut exec = entry;
@@ -1521,7 +1604,7 @@ impl Interpretter {
                         if breakpoints[&exec] {
                             breakpoints.remove(&exec);
                         }
-                        stack[stack_pos]=exec;
+                        state.stack[stack_pos]=exec;
                         return;
                     }
                     let t:&'static str = Interpretter::next_instruction(&exec,actions).into();
@@ -1529,7 +1612,7 @@ impl Interpretter {
                         if instruction_breakpoints[t] {
                             instruction_breakpoints.remove(t);
                         }
-                        stack[stack_pos]=exec;
+                        state.stack[stack_pos]=exec;
                         return;
                     }
                 }
@@ -1537,11 +1620,11 @@ impl Interpretter {
                 match Interpretter::interpret_instructions(resources,state,&exec,actions,logic_sequence) {
                     Some(newpc) => {
                         if newpc.is_input_request() {
-                            stack[stack_pos]=newpc;
+                            state.stack[stack_pos]=newpc;
                             return;
                         } else if newpc.is_call(entry.get_logic()) {
-                            stack[stack_pos]=exec.next();
-                            stack.push(newpc);
+                            state.stack[stack_pos]=exec.next();
+                            state.stack.push(newpc);
                             if single_step {
                                 return;
                             }
@@ -1549,19 +1632,19 @@ impl Interpretter {
                         } else {
                             exec = newpc;
                             if single_step {
-                                stack[stack_pos]=exec;
+                                state.stack[stack_pos]=exec;
                                 return;
                             }
                         }
                     },
                     None => {
-                        stack.pop();
+                        state.stack.pop();
                         if single_step {
                             return;
                         }
                         if state.get_new_room()!=0 || state.restart {
                             state.restart=false;
-                            stack.clear();  // new_room short circuits the interpretter cycle
+                            state.stack.clear();  // new_room short circuits the interpretter cycle
                         }
                         break;
                     },
@@ -1571,11 +1654,11 @@ impl Interpretter {
 
     }
 
-    pub fn call(breakpoints:&mut HashMap<LogicExecutionPosition,bool>,instruction_breakpoints:&mut HashMap<&'static str,bool>,resources:&GameResources,stack:&mut Vec<LogicExecutionPosition>,state:&mut LogicState,logic_file:usize, logics:&HashMap<usize,LogicResource>,resume:bool,single_step:bool) {
-        if stack.is_empty() {
-            stack.push(LogicExecutionPosition::new(logic_file,0));
+    pub fn call(breakpoints:&mut HashMap<LogicExecutionPosition,bool>,instruction_breakpoints:&mut HashMap<&'static str,bool>,resources:&GameResources,state:&mut LogicState,logic_file:usize, logics:&HashMap<usize,LogicResource>,resume:bool,single_step:bool) {
+        if state.stack.is_empty() {
+            state.stack.push(LogicExecutionPosition::new(logic_file,0));
         }
-        Interpretter::do_call(breakpoints, instruction_breakpoints, resources, stack, state,logics,resume,single_step);
+        Interpretter::do_call(breakpoints, instruction_breakpoints, resources, state,logics,resume,single_step);
     }
 
     pub fn key_code_pressed(&mut self,key_code:AgiKeyCodes) {
@@ -1588,7 +1671,7 @@ impl Interpretter {
 
     pub fn run(&mut self,resume:bool,single_step:bool) {
 
-        let mut resuming = !self.stack.is_empty();
+        let mut resuming = !self.state.stack.is_empty();
         let mutable_state = &mut self.state;
         if !resuming && mutable_state.menu_input {
             mutable_state.menu_buffer=[255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
@@ -1623,8 +1706,6 @@ impl Interpretter {
             mutable_state.render_final_buffer(&self.resources);
             return;
         } 
-
-        let mutable_stack = &mut self.stack;
 
         // delay (increment time by delay for now, in future, we should actually delay!)
         self.started+=(mutable_state.get_var(&VAR_TIME_DELAY)+1) as u64;
@@ -1707,8 +1788,8 @@ impl Interpretter {
                 mutable_state.reset_new_room();
             }
             
-            Interpretter::call(&mut self.breakpoints,&mut self.instruction_breakpoints,&self.resources,mutable_stack,mutable_state, 0, &self.resources.logic,resume,single_step);
-            if !mutable_stack.is_empty() {
+            Interpretter::call(&mut self.breakpoints,&mut self.instruction_breakpoints,&self.resources,mutable_state, 0, &self.resources.logic,resume,single_step);
+            if !mutable_state.stack.is_empty() {
                 break;
             } else {
                 resuming=false;
@@ -2500,6 +2581,16 @@ impl Interpretter {
                 state.set_flag(&FLAG_SOUND_ENABLED,snd_state);
                 state.restart=true;
                 return None;
+            },
+            ActionOperation::SaveGame(()) => {
+                let data = bincode::serialize(state);
+                let data=data.unwrap();
+                fs::write("../save_test.bin",data).unwrap();
+                //TODO
+            },
+            ActionOperation::RestoreGame(()) => {
+                let data = fs::read("../save_test.bin").unwrap();
+                *state=bincode::deserialize(&data[..]).unwrap()
             }
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
@@ -2861,6 +2952,7 @@ pub fn command_input(state: &mut LogicState, s: String, max_length: usize, m: &S
 }
 
 #[derive(Copy,Clone,Debug,Hash,PartialEq,Eq)]
+#[derive(Serialize,Deserialize)]
 pub struct LogicExecutionPosition {
     logic_file:usize,
     program_counter:usize,

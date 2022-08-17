@@ -253,8 +253,8 @@ fn main() -> Result<(), String> {
         });
 
         Window::new("LOGIC").build(&ui, || {
-            if (live_debug_view || pause) && !interpretter.stack.is_empty() {
-                let top_of_stack = &interpretter.stack[interpretter.stack.len()-1];
+            if (live_debug_view || pause) && !interpretter.state.stack.is_empty() {
+                let top_of_stack = &interpretter.state.stack[interpretter.state.stack.len()-1];
                 let file = top_of_stack.get_logic();
                 let logic = interpretter.resources.logic.get(&file);
                 if !logic.is_none() {
@@ -317,7 +317,7 @@ fn main() -> Result<(), String> {
 
         Window::new("STACK").build(&ui, || {
             if live_debug_view || pause {
-                for a in (&interpretter.stack).into_iter().rev() {
+                for a in (&interpretter.state.stack).into_iter().rev() {
                     ui.text(format!("Logic : {} | PC : {}", a.get_logic(),a.get_pc()));
                 }
             }
