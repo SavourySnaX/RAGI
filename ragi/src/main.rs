@@ -22,9 +22,10 @@ const LL1:bool=false;
 const SQ1:bool=false;
 const SQ2:bool=false;
 const SQ2_F:bool=false;
-const GR:bool =true;
+const GR:bool =false;
 const BC:bool =false;
-const MH1:bool = false;
+const MH1:bool = true;
+const TMP1:bool = false;
 
 fn main() -> Result<(), String> {
 
@@ -81,7 +82,9 @@ fn main() -> Result<(), String> {
         interpretter.set_breakpoint(0,0,true);
     } else if MH1 {
         interpretter=Interpretter::new("../images/Manhunter- New York v1.22 (1988)(Sierra On-Line, Inc.) [Adventure]/","3.002.102").unwrap();
-        interpretter.set_breakpoint(153,150,true);
+        //interpretter.set_breakpoint(153,150,true);
+    } else if TMP1 {
+        interpretter=Interpretter::new("../images/TexMcPhilip1QuestForThePapacy/","3.002.102").unwrap();
     } else {
         panic!("NO GAME SET");
     }
