@@ -8,7 +8,7 @@ use itertools::Itertools;
 use logic::*;
 use objects::{Objects, Object};
 use picture::*;
-use rand::{rngs::ThreadRng, Rng};
+use rand::Rng;
 use serde::{Deserialize, Serialize, Serializer, Deserializer};
 use view::{ViewResource, ViewLoop, ViewCel};
 use volume::Volume;
@@ -771,9 +771,27 @@ enum MenuDirection {
 }
 
 #[derive(Serialize,Deserialize)]
+struct AgiRandom {
+    rnd_seed:u16,
+}
+
+impl AgiRandom {
+    pub fn new() -> AgiRandom {
+        AgiRandom { rnd_seed: 0 }
+    }
+    fn gen_range(&mut self,range:std::ops::RangeInclusive<u8>) -> u8 {
+        if self.rnd_seed == 0 {
+            self.rnd_seed = rand::thread_rng().gen_range(1u16..=65535)+1;
+        }
+        self.rnd_seed = ((self.rnd_seed.wrapping_mul(0x7C4D))%65535)+1;
+        range.start().wrapping_add((self.rnd_seed%((range.end()-range.start()+1)as u16)) as u8)
+    }
+}
+
+
+#[derive(Serialize,Deserialize)]
 pub struct LogicState {
-    #[serde(skip)]  // TODO FIX?
-    rng:ThreadRng,
+    rng:AgiRandom,
     new_room:u8,
     restart:bool,
     text_mode:bool,
@@ -838,24 +856,16 @@ pub struct LogicState {
 
     pub stack:Vec<LogicExecutionPosition>,  // to fix needs accessor
 
-
     // video
-    #[serde(with = "serde_arrays")]
-    picture_buffer:[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
-    #[serde(with = "serde_arrays")]
-    priority_buffer:[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
+    picture_buffer:Vec<u8>,
+    priority_buffer:Vec<u8>,
+    
+    back_buffer:Vec<u8>,
+    post_sprites:Vec<u8>,
 
-    #[serde(with = "serde_arrays")]
-    back_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
-    #[serde(with = "serde_arrays")]
-    post_sprites:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
-
-    #[serde(with = "serde_arrays")]
-    text_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
-    #[serde(with = "serde_arrays")]
-    menu_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
-    #[serde(with = "serde_arrays")]
-    final_buffer:[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+    text_buffer:Vec<u8>,
+    menu_buffer:Vec<u8>,
+    final_buffer:Vec<u8>,
 }
 
 impl Default for LogicState {
@@ -868,7 +878,7 @@ impl LogicState {
 
     pub fn new() -> LogicState {
         LogicState {
-            rng:rand::thread_rng(),
+            rng:AgiRandom::new(),
             new_room: 0,
             restart:false,
             text_mode:false,
@@ -909,13 +919,13 @@ impl LogicState {
             key_len:0,
             key_buffer:[AgiKeyCodes::Enter;256],
             controllers:HashMap::new(),
-            picture_buffer:[15;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
-            priority_buffer:[4;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
-            back_buffer:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
-            post_sprites:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
-            text_buffer:[255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
-            menu_buffer:[255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
-            final_buffer:[0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+            picture_buffer:vec![15;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
+            priority_buffer:vec![4;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE],
+            back_buffer:vec![0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+            post_sprites:vec![0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+            text_buffer:vec![255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+            menu_buffer:vec![255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
+            final_buffer:vec![0;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],
         }
     }
 
@@ -1139,7 +1149,7 @@ impl LogicState {
 
     pub fn set_text_mode(&mut self,b:bool) {
         self.text_mode=b;
-        self.text_buffer = [255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
+        self.text_buffer.copy_from_slice(&[255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]);
     }
 
     pub fn set_status_visible(&mut self,b:bool) {
@@ -1199,43 +1209,43 @@ impl LogicState {
         (0..self.objects.len()).zip(self.objects.iter_mut()).filter(|(_,b)| b.active)
     }
 
-    pub fn picture(&self) -> &[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
+    pub fn picture(&self) -> &Vec<u8> {
         &self.picture_buffer
     }
     
-    pub fn mut_picture(&mut self) -> &mut [u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
+    pub fn mut_picture(&mut self) -> &mut Vec<u8> {
         &mut self.picture_buffer
     }
     
-    pub fn priority(&self) -> &[u8;PIC_WIDTH_USIZE*PIC_HEIGHT_USIZE] {
+    pub fn priority(&self) -> &Vec<u8> {
         &self.priority_buffer
     }
 
-    pub fn back_buffer(&self) -> &[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
+    pub fn back_buffer(&self) -> &Vec<u8> {
         &self.back_buffer
     }
     
-    pub fn mut_back_buffer(&mut self) -> &mut [u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
+    pub fn mut_back_buffer(&mut self) -> &mut Vec<u8> {
         &mut self.back_buffer
     }
 
-    pub fn text_buffer(&self) -> &[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
+    pub fn text_buffer(&self) -> &Vec<u8> {
         &self.text_buffer
     }
 
-    pub fn screen_buffer(&self) -> &[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
+    pub fn screen_buffer(&self) -> &Vec<u8> {
         &self.post_sprites
     }
 
-    pub fn final_buffer(&self) -> &[u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE] {
+    pub fn final_buffer(&self) -> &Vec<u8> {
         &self.final_buffer
     }
 
     pub fn render_final_buffer(&mut self,resources:&GameResources) {
         if self.text_mode {
-            self.final_buffer = [0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
+            self.final_buffer.copy_from_slice(&[0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]);
         } else {
-            self.final_buffer = self.post_sprites;
+            self.final_buffer.copy_from_slice(&self.post_sprites);
 
             if self.status_visible {
                 // Render Status Line (just a white bar for now)
@@ -1674,7 +1684,7 @@ impl Interpretter {
         let mut resuming = !self.state.stack.is_empty();
         let mutable_state = &mut self.state;
         if !resuming && mutable_state.menu_input {
-            mutable_state.menu_buffer=[255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
+            mutable_state.menu_buffer.copy_from_slice(&[255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]);
             for y in 0..8 {
                 for x in 0..SCREEN_WIDTH_USIZE {
                     mutable_state.menu_buffer[x+y*SCREEN_WIDTH_USIZE]=15;
@@ -1903,7 +1913,7 @@ impl Interpretter {
     }
 
     pub fn new_room(resources:&GameResources,state:&mut LogicState,room:u8) {
-        state.text_buffer = [255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
+        state.text_buffer.copy_from_slice(&[255u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]);
 
         // Stop.update()
         //unanimate.all()
@@ -2131,7 +2141,13 @@ impl Interpretter {
             ActionOperation::SetPriority((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_priority(n); },
             ActionOperation::SetLoop((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_loop(n,resources); },
             ActionOperation::SetCel((obj,num)) => { let n=state.get_num(num); state.mut_object(obj).set_cel(n,resources); },
-            ActionOperation::DrawPic((var,)) => { let n = state.get_var(var); resources.pictures[&usize::from(n)].render_to(&mut state.picture_buffer,&mut state.priority_buffer).unwrap(); erase_all_add_to_pic(state); },
+            ActionOperation::DrawPic((var,)) => { 
+                let n = state.get_var(var); 
+                let (pic,pri) = resources.pictures[&usize::from(n)].render().unwrap();
+                state.picture_buffer.copy_from_slice(&pic);
+                state.priority_buffer.copy_from_slice(&pri);
+                erase_all_add_to_pic(state); 
+            },
             ActionOperation::ShowPic(()) => {
                 let dpic = double_pic_width(state.picture());
                 for y in 0usize..PIC_HEIGHT_USIZE {
@@ -2419,7 +2435,7 @@ impl Interpretter {
                 if state.displayed != "STATUS" {
                     state.displayed=String::from("STATUS");
                     state.set_text_mode(true);
-                    state.text_buffer=[15u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE];
+                    state.text_buffer.copy_from_slice(&[15u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]);
                     state.clear_keys();
 
                     Self::display_text(resources, state, 20-16/2, 0, &String::from("You are carrying:"), 0, 15);
@@ -2583,14 +2599,17 @@ impl Interpretter {
                 return None;
             },
             ActionOperation::SaveGame(()) => {
-                let data = bincode::serialize(state);
-                let data=data.unwrap();
+                let stack_pos = state.stack.len()-1;
+                state.stack[stack_pos]=*pc;    // ensure stack is positioned correctly for resume
+                let data = bincode::serialize(state).unwrap();
                 fs::write("../save_test.bin",data).unwrap();
-                //TODO
             },
             ActionOperation::RestoreGame(()) => {
+
                 let data = fs::read("../save_test.bin").unwrap();
-                *state=bincode::deserialize(&data[..]).unwrap()
+                *state=bincode::deserialize(&data).unwrap();
+                let stack_pos = state.stack.len()-1;
+                return Some(state.stack[stack_pos].next());
             }
 
             _ => panic!("TODO {:?}:{:?}",pc,action),
@@ -2611,7 +2630,7 @@ impl Interpretter {
         }
     }
 
-    pub fn render_glyph(resources:&GameResources,buffer:&mut [u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE],x:u16,y:u8,g:u8,ink:u8,paper:u8) {
+    pub fn render_glyph(resources:&GameResources,buffer:&mut Vec<u8>,x:u16,y:u8,g:u8,ink:u8,paper:u8) {
         let s = resources.font.as_slice();
         let x = x as usize;
         let y = y as usize;
@@ -3440,7 +3459,7 @@ pub fn shuffle_delayed(resources:&GameResources,state:&mut LogicState) {
 }
 
 pub fn render_sprites(resources:&GameResources,state:&mut LogicState, disable_background:bool) {
-    state.post_sprites = if disable_background {[0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]} else {state.back_buffer};
+    state.post_sprites.copy_from_slice(if disable_background {&[0u8;SCREEN_WIDTH_USIZE*SCREEN_HEIGHT_USIZE]} else {&state.back_buffer});
 
     for num in state.active_objects_indices_sorted_pri_y() {
         let obj_num = TypeObject::from(num as u8);
