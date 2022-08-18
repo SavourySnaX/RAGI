@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, fmt, cmp::Ordering, hash::Hash, process::exit};
+use std::{collections::HashMap, fs, fmt, cmp::Ordering, hash::Hash, process::exit, time::Instant};
 
 use dir_resource::{Root, ResourceDirectory, ResourceType, ResourcesVersion};
 use fixed::{FixedU16, FixedI32, types::extra::U8};
@@ -652,6 +652,7 @@ impl Sprite {
 
 pub struct GameResources
 {
+    pub version:ResourcesVersion,
     pub objects:Objects,
     pub words:Words,
     pub views:HashMap<usize,ViewResource>,
@@ -716,6 +717,7 @@ impl GameResources {
         logic.shrink_to_fit();
 
         return Ok(GameResources {
+            version: *root.version(),
             words : Words::new(root.read_data_or_default("WORDS.TOK").into_iter())?,
             objects: Objects::new(&root.read_data_or_default("OBJECT"))?,
             views,
@@ -798,6 +800,7 @@ pub struct LogicState {
     text_mode:bool,
     input:bool,
     ego_player_control:bool,
+    ego_hold_mode:bool,
     status_visible:bool,
     horizon:u8,
     #[serde(with = "serde_arrays")]
@@ -842,6 +845,7 @@ pub struct LogicState {
     #[serde(with = "serde_arrays")]
     menu:[Menu;256],    // overkill
     menu_ready:bool,
+    menu_allowed:bool,
     menu_input:bool,
     menu_num:u8,
     menu_item:u8,
@@ -886,6 +890,7 @@ impl LogicState {
             text_mode:false,
             input: false,
             ego_player_control: true,
+            ego_hold_mode: false,
             status_visible: false,
             horizon: 0,
             flag: [false;256],
@@ -915,6 +920,7 @@ impl LogicState {
             menu: [();256].map(|_| Menu::new()),
             menu_ready: false,
             menu_input: false,
+            menu_allowed: true,
             menu_has_key: false,
             menu_num: 0,
             menu_item: 0,
@@ -936,6 +942,10 @@ impl LogicState {
         for (idx,i) in items.iter().enumerate() {
             self.item_location[idx]=i.start_room;
         }
+    }
+
+    pub fn get_menu_allowed(&self) -> bool {
+        self.menu_allowed
     }
 
     pub fn get_parsed_word_num(&self,num:u8) -> String {
@@ -1018,6 +1028,10 @@ impl LogicState {
         self.ego_player_control
     }
 
+    pub fn is_ego_hold_mode(&self) -> bool {
+        self.ego_hold_mode
+    }
+
     pub fn is_input_enabled(&self) -> bool {
         self.input && !self.text_mode
     }
@@ -1061,6 +1075,10 @@ impl LogicState {
         }
     }
 
+    pub fn set_ego_hold_mode(&mut self,b:bool) {
+        self.ego_hold_mode=b;
+    }
+
     pub fn mut_num_string(&mut self) -> &mut String {
         &mut self.num_string
     }
@@ -1085,6 +1103,10 @@ impl LogicState {
 
     pub fn clear_logic_start(&mut self,pos:&LogicExecutionPosition) {
         self.logic_start[pos.logic_file]=0;
+    }
+    
+    pub fn set_menu_allowed(&mut self,n:u8) {
+        self.menu_allowed = !(n==0);
     }
 
     pub fn set_var(&mut self,v:&TypeVar,n:u8) {
@@ -1571,7 +1593,8 @@ pub struct Interpretter {
     pub keys:Vec<AgiKeyCodes>,
     pub breakpoints:HashMap<LogicExecutionPosition,bool>,
     pub instruction_breakpoints:HashMap<&'static str,bool>,
-    pub started:u64     // 1/20 ticks since started, so seconds is divdide this by 20
+    pub started:u64,     // 1/20 ticks since started, so seconds is divdide this by 20
+    pub real_time:Instant,
 }
 
 impl Interpretter {
@@ -1584,6 +1607,7 @@ impl Interpretter {
             breakpoints: HashMap::new(),
             instruction_breakpoints: HashMap::new(),
             started:0,
+            real_time:Instant::now(),
         };
         i.state.set_var(&VAR_TIME_DELAY,2);
         i.state.set_var(&VAR_FREE_PAGES,255);
@@ -1754,18 +1778,29 @@ impl Interpretter {
             // if player.control (var(6) = EGO dir)
             if mutable_state.is_ego_player_controlled() {
 
-                // emulate walking behaviour
-                let mut d = mutable_state.get_var(&VAR_EGO_MOTION_DIR);
-                for k in &self.keys {
-                    d = match k {
-                        AgiKeyCodes::Left => if d==7 { 0 } else { 7 },
-                        AgiKeyCodes::Right => if d==3 { 0 } else { 3 },
-                        AgiKeyCodes::Up => if d==1 { 0 } else { 1 },
-                        AgiKeyCodes::Down => if d==5 { 0 } else { 5 },
-                        _ => d,
+                let dx = if mutable_state.is_key_pressed(&AgiKeyCodes::Left) {
+                    -1i32
+                } else if mutable_state.is_key_pressed(&AgiKeyCodes::Right) {
+                    1i32
+                } else {
+                    0i32
+                };
+                let dy = if mutable_state.is_key_pressed(&AgiKeyCodes::Up) {
+                    -1i32
+                } else if mutable_state.is_key_pressed(&AgiKeyCodes::Down) {
+                    1i32
+                } else {
+                    0i32
+                };
+                let mut d = get_direction_from_delta(dx, dy);
+
+                if !mutable_state.is_ego_hold_mode() {
+                    if d == mutable_state.get_var(&VAR_EGO_MOTION_DIR) {
+                        d=0;
+                    } else if d==0 {
+                        d=mutable_state.get_var(&VAR_EGO_MOTION_DIR);
                     }
                 }
-
                 mutable_state.set_var(&VAR_EGO_MOTION_DIR, d);
             } else {
                 let d = mutable_state.get_var(&VAR_EGO_MOTION_DIR);
@@ -1779,20 +1814,23 @@ impl Interpretter {
 
             // If score has changed(var(3)) or sound has turned off/on (flag(9)), update status line
             //show VAR_CURRENT_SCORE out of VAR_MAXIMUM_SCORE .... SOUND ON/OFF
+        }
+        
+        {
+            let secs = self.real_time.elapsed().as_secs();
+            if secs>0 {
+                self.real_time=Instant::now();
 
-            let mut since_started = self.started/20;
-            let days = since_started/(60*60*24);
-            since_started%=24*60*60;
-            let hours = since_started/(60*60);
-            since_started%=60*60;
-            let minutes = since_started/(60);
-            since_started%=60;
-            let seconds = since_started;
-
-            mutable_state.set_var(&VAR_DAYS,days as u8);
-            mutable_state.set_var(&VAR_HOURS,hours as u8);
-            mutable_state.set_var(&VAR_MINUTES,minutes as u8);
-            mutable_state.set_var(&VAR_SECONDS,seconds as u8);
+                let new_secs = mutable_state.get_var(&VAR_SECONDS) as u64 + secs;
+                let new_mins = mutable_state.get_var(&VAR_MINUTES) as u64 + new_secs/60;
+                let new_hours = mutable_state.get_var(&VAR_HOURS) as u64 + new_mins/60;
+                let new_days = mutable_state.get_var(&VAR_DAYS) as u64 + new_hours/24;
+            
+                mutable_state.set_var(&VAR_SECONDS,(new_secs%60) as u8);
+                mutable_state.set_var(&VAR_MINUTES,(new_mins%60) as u8);
+                mutable_state.set_var(&VAR_HOURS,(new_hours%24) as u8);
+                mutable_state.set_var(&VAR_DAYS,new_days as u8);
+            }
         }
         
         loop {
@@ -1837,7 +1875,7 @@ impl Interpretter {
         mutable_state.render_final_buffer(&self.resources);
     }
 
-    fn evaluate_condition_operation(resources:&GameResources,state:&mut LogicState,op:&ConditionOperation,need_tick:&mut bool) -> bool {
+    fn evaluate_condition_operation(resources:&GameResources,state:&mut LogicState,op:&ConditionOperation) -> bool {
         match op {
             ConditionOperation::EqualN((var,num)) => state.get_var(var) == state.get_num(num),
             ConditionOperation::EqualV((var1,var2)) => state.get_var(var1) == state.get_var(var2),
@@ -1852,15 +1890,8 @@ impl Interpretter {
             ConditionOperation::Posn((obj,num1,num2,num3,num4)) => is_left_edge_in_box(resources,state,obj,num1,num2,num3,num4),
             ConditionOperation::Controller((key,)) => { let pressed=state.is_controller_pressed(key); /*state.clear_key(key);*/ pressed },
             ConditionOperation::HaveKey(_) => {
-                // Can lock up completely as often used like so :
-                //recheck:
-                //if !HaveKey() {
-                //    goto recheck;
-                //}
-                // So for now, we let interpretter exit if false would be returned
                 let key_pressed = state.key_len>0;
                 state.clear_keys();
-                *need_tick|=!key_pressed;
                 key_pressed
             },
             ConditionOperation::Said((w,)) => state.check_said(w),
@@ -1890,25 +1921,25 @@ impl Interpretter {
         }
     }
 
-    fn evaluate_condition_or(resources:&GameResources,state:&mut LogicState,cond:&Vec<LogicChange>,need_tick:&mut bool) -> bool {
+    fn evaluate_condition_or(resources:&GameResources,state:&mut LogicState,cond:&Vec<LogicChange>) -> bool {
         let mut result = false;
         for a in cond {
             result |= match a {
-                LogicChange::Normal((op,)) => Self::evaluate_condition_operation(resources,state,op,need_tick),
-                LogicChange::Not((op,)) => !Self::evaluate_condition_operation(resources,state,op,need_tick),
+                LogicChange::Normal((op,)) => Self::evaluate_condition_operation(resources,state,op),
+                LogicChange::Not((op,)) => !Self::evaluate_condition_operation(resources,state,op),
                 _ => panic!("Should not occur i think {:?}", a),
             };
         }
         result
     }
 
-    fn evaluate_condition(resources:&GameResources,state:&mut LogicState,cond:&Vec<LogicChange>,need_tick:&mut bool) -> bool {
+    fn evaluate_condition(resources:&GameResources,state:&mut LogicState,cond:&Vec<LogicChange>) -> bool {
         let mut result = true;
         for a in cond {
             result &= match a {
-                LogicChange::Normal((op,)) => Self::evaluate_condition_operation(resources,state,op,need_tick),
-                LogicChange::Not((op,)) => !Self::evaluate_condition_operation(resources,state,op,need_tick),
-                LogicChange::Or((or_block,)) => Self::evaluate_condition_or(resources,state, or_block,need_tick),
+                LogicChange::Normal((op,)) => Self::evaluate_condition_operation(resources,state,op),
+                LogicChange::Not((op,)) => !Self::evaluate_condition_operation(resources,state,op),
+                LogicChange::Or((or_block,)) => Self::evaluate_condition_or(resources,state, or_block),
             };
             if !result {  // Early out evaluation
                 break;
@@ -2099,8 +2130,6 @@ impl Interpretter {
             ActionOperation::OpenDialog(()) => /* TODO RAGI */ println!("TODO : OpenDialog@{}",pc),
             ActionOperation::CloseDialog(()) => /* TODO RAGI */ println!("TODO : CloseDialog@{}",pc),
             ActionOperation::SetPriBase((num,)) => /* TODO RAGI */ println!("TODO : SetPriBase@{} {}",pc,state.get_num(num)),
-            ActionOperation::HoldKey(()) => /* TODO RAGI */ println!("TODO : HoldKey@{}",pc),
-            ActionOperation::ReleaseKey(()) => /* TODO RAGI */ println!("TODO : ReleaseKey@{}",pc),
             ActionOperation::PushScript(()) => /* TODO RAGI */ println!("TODO : PushScript@{}",pc),
             ActionOperation::PopScript(()) => /* TODO RAGI */ println!("TODO : PopScript@{}",pc),
             ActionOperation::InitJoy(()) => /* TODO RAGI */ println!("TODO: InitJoy@{}",pc),
@@ -2121,22 +2150,21 @@ impl Interpretter {
 
             // Everything else
             ActionOperation::If((condition,goto_if_false)) => {
-                let mut need_tick=false;
                 let new_pc:LogicExecutionPosition;
-                if !Self::evaluate_condition(resources,state,condition,&mut need_tick) 
+                if !Self::evaluate_condition(resources,state,condition) 
                 {
                     new_pc = pc.jump(logic_sequence,goto_if_false);
                 } else {
                     new_pc = pc.next();
                 }
-                if need_tick {
-                    return Some(new_pc.user_input());
-                } else {
-                    return Some(new_pc);
-                }
+                return Some(new_pc);
             },
             ActionOperation::Goto((goto,)) => {
-                return Some(pc.jump(logic_sequence, goto))
+                if pc.is_backwards(logic_sequence, goto) {
+                    // This can slow room transitions if we do it blindy, so we need an i am stuck check (or we need to refresh only for HaveKey or checks against SECONDS/MINUTES/HOURS/DAYS)
+                    return Some(pc.jump(logic_sequence,goto).user_input()); // for backwards jumps, we need to re-poll keys/timer to prevent getting stuck
+                }
+                return Some(pc.jump(logic_sequence, goto));
             },
             ActionOperation::Return(()) => return None,
             ActionOperation::Call((num,)) => { let logic = state.get_num(num); return Some(LogicExecutionPosition {logic_file:logic as usize, program_counter: state.get_logic_start(logic), user_input_request: false}) },
@@ -2604,7 +2632,7 @@ impl Interpretter {
                     }
                 }
             },
-            ActionOperation::MenuInput(()) => if state.get_flag(&FLAG_MENU_ENABLED) { state.menu_input=true; },
+            ActionOperation::MenuInput(()) => if state.get_flag(&FLAG_MENU_ENABLED) { state.menu_input=state.get_menu_allowed(); },
             ActionOperation::ShowObjV((var,)) => {
                 let v = state.get_var(var) as usize;
                 if !Self::show_object(resources, state, pc.get_logic(), v) {
@@ -2653,6 +2681,15 @@ impl Interpretter {
                 if r.is_ok() {
                     state.picture_buffer.copy_from_slice(&pic);
                     state.priority_buffer.copy_from_slice(&pri);
+                }
+            },
+            ActionOperation::AllowMenu((num,)) => state.set_menu_allowed(state.get_num(num)),
+            ActionOperation::HoldKey(()) => state.set_ego_hold_mode(true),
+            ActionOperation::ReleaseKey(()) => state.set_ego_hold_mode(false),
+            ActionOperation::Version(()) => {
+                match Self::handle_window_with_key(resources, state, format!("R.A.G.I.\nVersion {}",resources.version), 255, 255, 255) {
+                    Some(AgiKeyCodes::Escape) | Some(AgiKeyCodes::Enter) => {},
+                    _ => return Some(pc.user_input()),
                 }
             },
 
@@ -3048,6 +3085,11 @@ impl LogicExecutionPosition {
 
     pub fn jump(&self, sequence:&LogicSequence, goto:&TypeGoto) -> LogicExecutionPosition {
         LogicExecutionPosition { logic_file: self.logic_file, program_counter: sequence.lookup_offset(goto).unwrap(), user_input_request: false }
+    }
+
+    pub fn is_backwards(&self, sequence:&LogicSequence, goto:&TypeGoto) -> bool {
+        let pos = sequence.lookup_offset(goto).unwrap();
+        pos < self.program_counter
     }
 
     pub fn is_call(&self,logic_file:usize) -> bool {

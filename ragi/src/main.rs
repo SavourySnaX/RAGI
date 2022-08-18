@@ -19,12 +19,12 @@ const KQ2:bool=false;
 const KQ3:bool=false;
 const KQ4:bool=false;
 const LL1:bool=false;
-const SQ1:bool=false;
+const SQ1:bool=true;
 const SQ2:bool=false;
 const SQ2_F:bool=false;
 const GR:bool =false;
 const BC:bool =false;
-const MH1:bool = true;
+const MH1:bool = false;
 const TMP1:bool = false;
 
 fn main() -> Result<(), String> {

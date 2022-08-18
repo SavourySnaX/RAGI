@@ -56,9 +56,15 @@ mod tests {
 }
 
 
-#[derive(Eq)]
+#[derive(Eq,Clone,Copy)]
 pub struct ResourcesVersion {
     comparing:u64,
+}
+
+impl std::fmt::Display for ResourcesVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f,"{}.{}.{}",self.comparing>>32,(self.comparing>>16)&0xFFFF,self.comparing&0xFFFF)
+    }
 }
 
 pub struct Root<'a> {
@@ -82,7 +88,7 @@ impl ResourcesVersion {
             }
         }
         let comparing = (major as u64)<<32;
-        let comparing = comparing + (minor as u64)<<16;
+        let comparing = comparing + ((minor as u64)<<16);
         let comparing = comparing + (patch as u64);
         ResourcesVersion { comparing }
     }
