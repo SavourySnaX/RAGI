@@ -1036,7 +1036,7 @@ impl LogicState {
         self.input && !self.text_mode
     }
  
-    pub fn check_said(&mut self,to_check:&Vec<TypeWord>) -> bool {
+    pub fn check_said(&mut self,to_check:&[TypeWord]) -> bool {
         if !self.get_flag(&FLAG_COMMAND_ENTERED) || self.get_flag(&FLAG_SAID_ACCEPTED_INPUT) {
             return false;
         }
@@ -1577,7 +1577,7 @@ pub enum AgiKeyCodes {
 
 impl AgiKeyCodes {
     pub fn is_ascii(&self) -> bool {
-        u16::from(*self) < 256
+        u16::from(*self) < 256 || u16::from(*self) >0xFF00
     }
 
     pub fn get_ascii(&self) -> u8 {
@@ -1764,6 +1764,7 @@ impl Interpretter {
         if !resuming {
             // poll keyb/joystick
             mutable_state.clear_keys();
+            mutable_state.set_var(&VAR_CURRENT_KEY,0);
         }
 
         for k in &self.keys {
@@ -1889,11 +1890,7 @@ impl Interpretter {
             ConditionOperation::ObjInRoom((item,var)) => { let n=state.get_var(var); state.get_item_room(item)==n },
             ConditionOperation::Posn((obj,num1,num2,num3,num4)) => is_left_edge_in_box(resources,state,obj,num1,num2,num3,num4),
             ConditionOperation::Controller((key,)) => { let pressed=state.is_controller_pressed(key); /*state.clear_key(key);*/ pressed },
-            ConditionOperation::HaveKey(_) => {
-                let key_pressed = state.key_len>0;
-                state.clear_keys();
-                key_pressed
-            },
+            ConditionOperation::HaveKey(_) => state.get_var(&VAR_CURRENT_KEY)!=0,
             ConditionOperation::Said((w,)) => state.check_said(w),
             ConditionOperation::CompareStrings((a,b)) => {
                 let a=state.get_string(a).as_bytes();
@@ -2263,6 +2260,10 @@ impl Interpretter {
             ActionOperation::TextScreen(()) => state.set_text_mode(true),
             ActionOperation::GetString((s,m,num1,num2,num3)) => {
                 // This actually halts interpretter until the input string is entered
+                if state.displayed != "GETSTRING" {
+                    state.displayed=String::from("GETSTRING");
+                    state.clear_keys();
+                }
                 let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); 
                 let x=state.get_num(num2); 
                 let y=state.get_num(num1); 
@@ -2278,6 +2279,10 @@ impl Interpretter {
             },
             ActionOperation::GetNum((m,var)) => {
                 // This actually halts interpretter until the input string is entered
+                if state.displayed != "GETNUM" {
+                    state.displayed=String::from("GETNUM");
+                    state.clear_keys();
+                }
                 let m = Interpretter::decode_message_from_resource(state, resources, pc.logic_file, m); 
                 let x=0;
                 let y=state.input_line;

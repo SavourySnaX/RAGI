@@ -69,13 +69,13 @@ impl Volume {
                     return Ok((&slice[4..uncompressed_length+4], ResourceCompression::None));
                 }
                 let cache_entry:usize=entry.position as usize;
-                let cache_entry = cache_entry + (entry.volume as usize)<<32;
+                let cache_entry = cache_entry + ((entry.volume as usize)<<32);
                 if !cache.cache.contains_key(&cache_entry) {
                     let bytes = &slice[4..compressed_length+4];
                     let mut output:Vec<u8> = Vec::new();
                     output.reserve(uncompressed_length);
                     let decoded = agi_lzw_expand(bytes, &mut output);
-                    if let Ok(_) = decoded {
+                    if decoded.is_ok() {
                         let result_size=output.len();
                         if uncompressed_length==result_size {
                             cache.cache.insert(cache_entry, output);
@@ -187,7 +187,7 @@ impl LzwState {
     }
 
     fn is_input_remaining(&self,slice:&[u8]) -> bool {
-        (slice.len()!=0) || self.bit_remain!=0
+        (!slice.is_empty()) || self.bit_remain!=0
     }
     
 }
